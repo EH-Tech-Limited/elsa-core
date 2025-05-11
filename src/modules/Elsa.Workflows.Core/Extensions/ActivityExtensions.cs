@@ -3,9 +3,7 @@ using System.Reflection;
 using Elsa.Expressions.Helpers;
 using Elsa.Expressions.Models;
 using Elsa.Workflows;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Models;
-using Elsa.Workflows.Services;
 using JetBrains.Annotations;
 
 // ReSharper disable once CheckNamespace
@@ -66,7 +64,7 @@ public static class ActivityExtensions
     /// <param name="context">The activity execution context.</param>
     /// <param name="outputName">Name of the output.</param>
     /// <returns>The output value.</returns>
-    public static object? GetOutput(this IActivity activity, ActivityExecutionContext context, string? outputName = default)
+    public static object? GetOutput(this IActivity activity, ActivityExecutionContext context, string? outputName = null)
     {
         var workflowExecutionContext = context.WorkflowExecutionContext;
         var outputRegister = workflowExecutionContext.GetActivityOutputRegister();
@@ -86,7 +84,7 @@ public static class ActivityExtensions
     /// <param name="context">The expression execution context.</param>
     /// <param name="outputName">Name of the output.</param>
     /// <returns>The output value.</returns>
-    public static object? GetOutput(this IActivity activity, ExpressionExecutionContext context, string? outputName = default)
+    public static object? GetOutput(this IActivity activity, ExpressionExecutionContext context, string? outputName = null)
     {
         var activityExecutionContext = context.GetActivityExecutionContext();
 
@@ -133,6 +131,21 @@ public static class ActivityExtensions
     /// <typeparam name="T">The type of the output.</typeparam>
     /// <returns>The output value.</returns>
     public static T? GetOutput<TActivity, T>(this TActivity activity, ActivityExecutionContext context, Expression<Func<TActivity, object?>> outputExpression)
+    {
+        var outputName = outputExpression.GetPropertyName();
+        return ((IActivity)activity!).GetOutput<T>(context, outputName);
+    }
+    
+    /// <summary>
+    /// Gets the output with the specified name.
+    /// </summary>
+    /// <param name="activity">The activity.</param>
+    /// <param name="context">The context.</param>
+    /// <param name="outputExpression">The output expression.</param>
+    /// <typeparam name="TActivity">The type of the activity.</typeparam>
+    /// <typeparam name="T">The type of the output.</typeparam>
+    /// <returns>The output value.</returns>
+    public static T? GetOutput<TActivity, T>(this TActivity activity, ExpressionExecutionContext context, Expression<Func<TActivity, object?>> outputExpression)
     {
         var outputName = outputExpression.GetPropertyName();
         return ((IActivity)activity!).GetOutput<T>(context, outputName);

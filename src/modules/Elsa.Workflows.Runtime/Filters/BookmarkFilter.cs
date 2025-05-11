@@ -11,46 +11,46 @@ public class BookmarkFilter
     /// Gets or sets the ID of the bookmark.
     /// </summary>
     public string? BookmarkId { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the IDs of the bookmark.
     /// </summary>
     public ICollection<string>? BookmarkIds { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the IDs of the workflow instance.
     /// </summary>
     public string? WorkflowInstanceId { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the IDs of the workflow instances.
     /// </summary>
     public ICollection<string>? WorkflowInstanceIds { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the hash of the bookmark to find.
     /// </summary>
     public string? Hash { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the hashes of the bookmarks to find.
     /// </summary>
     public ICollection<string>? Hashes { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the correlation ID of the bookmark to find.
     /// </summary>
     public string? CorrelationId { get; set; }
-    
+
     /// <summary>
-    /// Gets or sets the activity type name of the bookmark to find.
+    /// Gets or sets the name of the bookmark to find.
     /// </summary>
-    public string? ActivityTypeName { get; set; }
-    
+    public string? Name { get; set; }
+
     /// <summary>
-    /// Gets or sets the activity type names of the bookmarks to find.
+    /// Gets or sets the names of the bookmarks to find.
     /// </summary>
-    public ICollection<string>? ActivityTypeNames { get; set; }
+    public ICollection<string>? Names { get; set; }
 
     /// <summary>
     /// Gets or sets the activity instance ID of the bookmark to find.
@@ -58,22 +58,32 @@ public class BookmarkFilter
     public string? ActivityInstanceId { get; set; }
 
     /// <summary>
+    /// Get or sets if the triggers to find is a tenant agnostic search
+    /// </summary>
+    public bool TenantAgnostic { get; set; }
+
+    /// <summary>
     /// Applies the filter to the specified query.
     /// </summary>
     public IQueryable<StoredBookmark> Apply(IQueryable<StoredBookmark> query)
     {
         var filter = this;
-        if (filter.BookmarkId != null) query = query.Where(x => x.BookmarkId == filter.BookmarkId);
-        if (filter.BookmarkIds != null) query = query.Where(x => filter.BookmarkIds.Contains(x.BookmarkId));
+        if (filter.BookmarkId != null) query = query.Where(x => x.Id == filter.BookmarkId);
+        if (filter.BookmarkIds != null) query = query.Where(x => filter.BookmarkIds.Contains(x.Id));
         if (filter.CorrelationId != null) query = query.Where(x => x.CorrelationId == filter.CorrelationId);
         if (filter.Hash != null) query = query.Where(x => x.Hash == filter.Hash);
         if (filter.Hashes != null) query = query.Where(x => filter.Hashes.Contains(x.Hash));
         if (filter.WorkflowInstanceId != null) query = query.Where(x => x.WorkflowInstanceId == filter.WorkflowInstanceId);
         if (filter.WorkflowInstanceIds != null) query = query.Where(x => filter.WorkflowInstanceIds.Contains(x.WorkflowInstanceId));
-        if (filter.ActivityTypeName != null) query = query.Where(x => x.ActivityTypeName == filter.ActivityTypeName);
-        if (filter.ActivityTypeNames != null) query = query.Where(x => filter.ActivityTypeNames.Contains(x.ActivityTypeName));
+        if (filter.Name != null) query = query.Where(x => x.Name == filter.Name);
+        if (filter.Names != null) query = query.Where(x => filter.Names.Contains(x.Name!));
         if (filter.ActivityInstanceId != null) query = query.Where(x => x.ActivityInstanceId == filter.ActivityInstanceId);
 
         return query;
     }
+
+    public static BookmarkFilter ByActivityTypeNames(IEnumerable<string> activityTypeNames) => new()
+    {
+        Names = activityTypeNames.ToList()
+    };
 }

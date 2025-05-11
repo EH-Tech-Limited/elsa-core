@@ -8,6 +8,7 @@ using Nuke.Common.Git;
 using Nuke.Common.IO;
 using Nuke.Common.ProjectModel;
 using Nuke.Common.Tooling;
+using Nuke.Common.Tools.Coverlet;
 using Nuke.Common.Tools.DotNet;
 using Nuke.Common.Utilities.Collections;
 using Nuke.Components;
@@ -16,23 +17,26 @@ using Serilog;
 [ShutdownDotNetAfterServerBuild]
 partial class Build : NukeBuild, ITest, IPack
 {
-    public static int Main() => Execute<Build>(x => ((ICompile) x).Compile);
+    public static int Main() => Execute<Build>(x => ((ICompile)x).Compile);
 
-    [Parameter("Configuration to build - Default is 'Debug' (local) or 'Release' (server)")] readonly Configuration Configuration = IsLocalBuild ? Configuration.Debug : Configuration.Release;
+    [Parameter("Configuration to build - Default is 'Debug' (local) or 'Release' (server)")]
+    readonly Configuration Configuration = IsLocalBuild ? Configuration.Debug : Configuration.Release;
 
     [GitRepository] readonly GitRepository GitRepository;
 
     AbsolutePath SourceDirectory => RootDirectory / "src";
 
     public AbsolutePath PackagesDirectory => RootDirectory / "packages";
+    public AbsolutePath TestResultDirectory => RootDirectory / "testresults";
 
     string TagVersion => GitRepository.Tags.SingleOrDefault(x => "v".StartsWith(x))?[1..];
     bool IsTaggedBuild => !string.IsNullOrWhiteSpace(TagVersion);
 
     string VersionSuffix;
 
-    [Parameter]
-    string Version;
+    [Parameter] string Version;
+
+    [Parameter] bool AnalyseCode;
 
     protected override void OnBuildInitialized()
     {
@@ -45,11 +49,8 @@ partial class Build : NukeBuild, ITest, IPack
             VersionSuffix = $"dev-{DateTime.UtcNow:yyyyMMdd-HHmm}";
         }
 
-        Log.Information("BUILD SETUP");
-        Log.Information("Configuration:\t{Configuration}", Configuration);
-        Log.Information("Version suffix:\t{VersionSuffix}", VersionSuffix);
-        Log.Information("Version:\t\t{Version}", Version);
-        Log.Information("Tagged build:\t{IsTaggedBuild}", IsTaggedBuild);
+        Log.Information("BUILD SETUP:\nConfiguration: {Configuration}\nVersion Suffix: {VersionSuffix}\nVersion: {Version}\nTagged Build: {IsTaggedBuild}\nAnalyse Code: {AnalyseCode}",
+            Configuration, VersionSuffix, Version, IsTaggedBuild, AnalyseCode);
     }
 
     Target Clean => _ => _
@@ -57,8 +58,13 @@ partial class Build : NukeBuild, ITest, IPack
         .Executes(() =>
         {
             SourceDirectory.GlobDirectories("**/bin", "**/obj").ForEach(x => x.DeleteDirectory());
-            ((IHazArtifacts) this).ArtifactsDirectory.CreateOrCleanDirectory();
+            ((IHazArtifacts)this).ArtifactsDirectory.CreateOrCleanDirectory();
+
+            TestResultDirectory.CreateOrCleanDirectory();
         });
+
+    public Configure<DotNetRestoreSettings> RestoreSettings => _ => _
+        .SetVerbosity(DotNetVerbosity.quiet);
 
     public Configure<DotNetBuildSettings> CompileSettings => _ => _
         // ensure we don't generate too much output in CI run
@@ -66,9 +72,16 @@ partial class Build : NukeBuild, ITest, IPack
         // 1  Displays severe warning messages
         .SetWarningLevel(IsServerBuild ? 0 : 1);
 
-    public IEnumerable<Project> TestProjects => ((IHazSolution) this).Solution.AllProjects.Where(x => x.Name.EndsWith("Tests"));
+    public IEnumerable<Project> TestProjects =>
+        ((IHazSolution)this).Solution.AllProjects.Where(x => x.Name.EndsWith("Tests"));
 
-    public Configure<DotNetTestSettings, Project> TestProjectSettings => (testSettings, _) => testSettings
-        .When(GitHubActions.Instance is not null, settings => settings.AddLoggers("GitHubActions;report-warnings=false"));
-
+    public Configure<DotNetTestSettings, Project> TestProjectSettings => (testSettings, project) => testSettings
+        .When(_ => GitHubActions.Instance is not null, settings => settings.AddLoggers("GitHubActions;report-warnings=false"))
+        .When(_ => AnalyseCode, settings => settings
+            .SetCoverletOutputFormat(CoverletOutputFormat.opencover)
+            .EnableCollectCoverage()
+            .SetResultsDirectory(TestResultDirectory)
+            .SetCoverletOutput($"{TestResultDirectory}/opencoverCoverage.xml")
+            .AddProcessAdditionalArguments("--collect:\"XPlat Code Coverage;Format=opencover\"")
+        );
 }

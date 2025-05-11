@@ -1,20 +1,13 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Elsa.Alterations.Core.Contracts;
-using Elsa.Alterations.Core.Entities;
 using Elsa.Alterations.Core.Enums;
 using Elsa.Alterations.Core.Filters;
-using Elsa.Common.Contracts;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Exceptions;
-using Elsa.Workflows.Management.Contracts;
-using Elsa.Workflows.Management.Filters;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
-using Elsa.Workflows.Runtime.Contracts;
-using Elsa.Workflows.Runtime.Filters;
 
 namespace Elsa.Alterations.Activities;
 
@@ -22,7 +15,7 @@ namespace Elsa.Alterations.Activities;
 /// Submits an alteration plan for execution.
 /// </summary>
 [Browsable(false)]
-[Activity("Elsa", "Alterations", "Dispatches jobs for the specified Alteration Plan", Kind = ActivityKind.Job)]
+[Activity("Elsa", "Alterations", "Dispatches jobs for the specified Alteration Plan", Kind = ActivityKind.Task)]
 public class DispatchAlterationJobs : CodeActivity
 {
     /// <inheritdoc />
@@ -30,12 +23,12 @@ public class DispatchAlterationJobs : CodeActivity
     {
         PlanId = new Input<string>(planId);
     }
-    
+
     /// <inheritdoc />
     public DispatchAlterationJobs([CallerFilePath] string? source = default, [CallerLineNumber] int? line = default) : base(source, line)
     {
     }
-    
+
     /// <summary>
     /// The ID of the alteration plan.
     /// </summary>
@@ -54,7 +47,7 @@ public class DispatchAlterationJobs : CodeActivity
         var plan = await alterationPlanStore.FindAsync(planFilter, cancellationToken);
 
         if (plan == null)
-            throw new FaultException($"Alteration Plan with ID {planId} not found.");
+            throw new FaultException(AlterationFaultCodes.PlanNotFound, AlterationFaultCategories.Alteration, DefaultFaultTypes.System, $"Alteration Plan with ID {planId} not found.");
 
         // Update status.
         plan.Status = AlterationPlanStatus.Dispatching;
@@ -72,5 +65,9 @@ public class DispatchAlterationJobs : CodeActivity
         var alterationJobDispatcher = context.GetRequiredService<IAlterationJobDispatcher>();
         foreach (var jobId in alterationJobIds)
             await alterationJobDispatcher.DispatchAsync(jobId, cancellationToken);
+
+        // Update status.
+        plan.Status = AlterationPlanStatus.Running;
+        await alterationPlanStore.SaveAsync(plan, cancellationToken);
     }
 }

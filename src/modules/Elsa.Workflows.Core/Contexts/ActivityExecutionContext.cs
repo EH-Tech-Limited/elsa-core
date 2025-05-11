@@ -1,26 +1,30 @@
-using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
-using Elsa.Common.Contracts;
+using Elsa.Common;
 using Elsa.Expressions.Helpers;
 using Elsa.Expressions.Models;
 using Elsa.Extensions;
 using Elsa.Mediator.Contracts;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Options;
-using Elsa.Workflows.Services;
+using JetBrains.Annotations;
 
 namespace Elsa.Workflows;
 
 /// <summary>
 /// Represents the context of an activity execution.
 /// </summary>
-public partial class ActivityExecutionContext : IExecutionContext
+[PublicAPI]
+public partial class ActivityExecutionContext : IExecutionContext, IDisposable
 {
     private readonly ISystemClock _systemClock;
-    private readonly List<Bookmark> _bookmarks = new();
+    private ActivityStatus _status;
+    private Exception? _exception;
     private long _executionCount;
+    private ActivityExecutionContext? _parentActivityExecutionContext;
+    
+    // Bookmarks created during the lifetime of this activity. 
+    private List<Bookmark> _newBookmarks = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ActivityExecutionContext"/> class.
@@ -29,7 +33,6 @@ public partial class ActivityExecutionContext : IExecutionContext
         string id,
         WorkflowExecutionContext workflowExecutionContext,
         ActivityExecutionContext? parentActivityExecutionContext,
-        ExpressionExecutionContext expressionExecutionContext,
         IActivity activity,
         ActivityDescriptor activityDescriptor,
         DateTimeOffset startedAt,
@@ -38,9 +41,14 @@ public partial class ActivityExecutionContext : IExecutionContext
         CancellationToken cancellationToken)
     {
         _systemClock = systemClock;
+        Properties = new ChangeTrackingDictionary<string, object>(Taint);
+        ActivityState = new ChangeTrackingDictionary<string, object>(Taint);
+        ActivityInput = new ChangeTrackingDictionary<string, object>(Taint);
         WorkflowExecutionContext = workflowExecutionContext;
         ParentActivityExecutionContext = parentActivityExecutionContext;
-        ExpressionExecutionContext = expressionExecutionContext;
+        var expressionExecutionContextProps = ExpressionExecutionContextExtensions.CreateActivityExecutionContextPropertiesFrom(workflowExecutionContext, workflowExecutionContext.Input);
+        expressionExecutionContextProps[ExpressionExecutionContextExtensions.ActivityKey] = activity;
+        ExpressionExecutionContext = new(workflowExecutionContext.ServiceProvider, new(), parentActivityExecutionContext?.ExpressionExecutionContext ?? workflowExecutionContext.ExpressionExecutionContext, expressionExecutionContextProps, Taint, CancellationToken);
         Activity = activity;
         ActivityDescriptor = activityDescriptor;
         StartedAt = startedAt;
@@ -49,9 +57,6 @@ public partial class ActivityExecutionContext : IExecutionContext
         CancellationToken = cancellationToken;
         Id = id;
         _publisher = GetRequiredService<INotificationSender>();
-
-        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _cancellationRegistration = _cancellationTokenSource.Token.Register(CancelActivity);
     }
 
     /// <summary>
@@ -80,6 +85,22 @@ public partial class ActivityExecutionContext : IExecutionContext
     public bool IsCompleted => Status is ActivityStatus.Completed or ActivityStatus.Canceled;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the activity is actively executing. 
+    /// </summary>
+    /// <remarks>
+    /// This flag is set to <c>true</c> immediately before the activity begins execution 
+    /// and is set to <c>false</c> once the execution is completed. 
+    /// It can be used to determine if an activity was in-progress in case of unexpected 
+    /// application termination, allowing the system to retry execution upon restarting. 
+    /// </remarks>
+    public bool IsExecuting { get; set; }
+
+    /// <summary>
+    /// The number of faults encountered during the execution of the activity and its descendants.
+    /// </summary>
+    public int AggregateFaultCount { get; set; }
+
+    /// <summary>
     /// The workflow execution context. 
     /// </summary>
     public WorkflowExecutionContext WorkflowExecutionContext { get; }
@@ -87,7 +108,15 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// The parent activity execution context, if any. 
     /// </summary>
-    public ActivityExecutionContext? ParentActivityExecutionContext { get; internal set; }
+    public ActivityExecutionContext? ParentActivityExecutionContext
+    {
+        get => _parentActivityExecutionContext;
+        internal set
+        {
+            _parentActivityExecutionContext = value;
+            _parentActivityExecutionContext?.Children.Add(this);
+        }
+    }
 
     /// <summary>
     /// The expression execution context.
@@ -101,7 +130,20 @@ public partial class ActivityExecutionContext : IExecutionContext
         {
             var containerVariables = (Activity as IVariableContainer)?.Variables ?? Enumerable.Empty<Variable>();
             var dynamicVariables = DynamicVariables;
-            return containerVariables.Concat(dynamicVariables).DistinctBy(x => x.Name);
+            var mergedVariables = new Dictionary<string, Variable>();
+            
+            foreach (var containerVariable in containerVariables)
+            {
+                var name = !string.IsNullOrEmpty(containerVariable.Name) ? containerVariable.Name : containerVariable.Id;
+                mergedVariables[name] = containerVariable;
+            }
+            
+            foreach (var dynamicVariable in dynamicVariables)
+            {
+                var name = !string.IsNullOrEmpty(dynamicVariable.Name) ? dynamicVariable.Name : dynamicVariable.Id;
+                mergedVariables[name] = dynamicVariable;
+            }
+            return mergedVariables.Values;
         }
     }
 
@@ -128,7 +170,23 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// The current status of the activity.
     /// </summary>
-    public ActivityStatus Status { get; private set; }
+    public ActivityStatus Status
+    {
+        get => _status;
+        private set
+        {
+            if (value == _status)
+                return;
+
+            _status = value;
+            Taint();
+        }
+    }
+
+    public IDisposable EnterExecution()
+    {
+        return new WorkflowExecutionState(this);
+    }
 
     /// <summary>
     /// Sets the current status of the activity.
@@ -136,20 +194,23 @@ public partial class ActivityExecutionContext : IExecutionContext
     public void TransitionTo(ActivityStatus status)
     {
         Status = status;
-        
-        if (Status is ActivityStatus.Completed 
-            or ActivityStatus.Canceled
-            or ActivityStatus.Faulted)
-            _cancellationRegistration.Dispose();
     }
-    
+
     /// <summary>
     /// Gets or sets the exception that occurred during the activity execution, if any.
     /// </summary>
-    public Exception? Exception { get; set; }
+    public Exception? Exception
+    {
+        get => _exception;
+        set
+        {
+            _exception = value;
+            Taint();
+        }
+    }
 
     /// <inheritdoc />
-    public IDictionary<string, object> Properties { get; set; } = new Dictionary<string, object>();
+    public IDictionary<string, object> Properties { get; private set; }
 
     /// <summary>
     /// A transient dictionary of values that can be associated with this activity execution context.
@@ -168,10 +229,17 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <remarks>As of tool version 3.0, all activity Ids are already unique, so there's no need to construct a hierarchical ID</remarks>
     public string NodeId => ActivityNode.NodeId;
 
+    public ISet<ActivityExecutionContext> Children { get; } = new HashSet<ActivityExecutionContext>();
+
     /// <summary>
-    /// A list of bookmarks created by the current activity.
+    /// A list of bookmarks associated with the current activity.
     /// </summary>
-    public IReadOnlyCollection<Bookmark> Bookmarks => new ReadOnlyCollection<Bookmark>(_bookmarks);
+    public IEnumerable<Bookmark> Bookmarks => WorkflowExecutionContext.Bookmarks.Where(x => x.ActivityInstanceId == Id);
+
+    /// <summary>
+    /// A collection of bookmarks created during the execution of the activity.
+    /// </summary>
+    public IEnumerable<Bookmark> NewBookmarks => _newBookmarks.AsReadOnly();
 
     /// <summary>
     /// The number of times this <see cref="ActivityExecutionContext"/> has executed.
@@ -186,18 +254,23 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// A dictionary of inputs for the current activity.
     /// </summary>
-    public IDictionary<string, object> ActivityInput { get; set; } = new Dictionary<string, object>();
+    public IDictionary<string, object> ActivityInput { get; private set; }
 
     /// <summary>
     /// Journal data will be added to the workflow execution log for the "Executed" event.  
     /// </summary>
     // ReSharper disable once CollectionNeverQueried.Global
-    public IDictionary<string, object?> JournalData { get; } = new Dictionary<string, object?>();
+    public IDictionary<string, object> JournalData { get; } = new Dictionary<string, object>();
 
     /// <summary>
     /// Stores the evaluated inputs, serialized, for the current activity for historical purposes.
     /// </summary>
-    public IDictionary<string, object> ActivityState { get; set; } = new Dictionary<string, object>();
+    public IDictionary<string, object> ActivityState { get; }
+
+    /// <summary>
+    /// Indicates whether the state of the current activity execution context has been modified.
+    /// </summary>
+    public bool IsDirty { get; private set; }
 
     /// <summary>
     /// Schedules the specified activity to be executed.
@@ -206,7 +279,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="completionCallback">An optional callback to invoke when the activity completes.</param>
     /// <param name="tag">An optional tag to associate with the activity execution.</param>
     /// <param name="variables">An optional list of variables to declare with the activity execution.</param>
-    public ValueTask ScheduleActivityAsync(IActivity? activity, ActivityCompletionCallback? completionCallback, object? tag = default, IEnumerable<Variable>? variables = default)
+    public ValueTask ScheduleActivityAsync(IActivity? activity, ActivityCompletionCallback? completionCallback, object? tag = null, IEnumerable<Variable>? variables = null)
     {
         var options = new ScheduleWorkOptions
         {
@@ -222,10 +295,9 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// </summary>
     /// <param name="activity">The activity to schedule.</param>
     /// <param name="options">The options used to schedule the activity.</param>
-    public async ValueTask ScheduleActivityAsync(IActivity? activity, ScheduleWorkOptions? options = default)
+    public async ValueTask ScheduleActivityAsync(IActivity? activity, ScheduleWorkOptions? options = null)
     {
-        var activityNode = activity != null ? WorkflowExecutionContext.FindNodeByActivity(activity) : default;
-        await ScheduleActivityAsync(activityNode, this, options);
+        await ScheduleActivityAsync(activity, this, options);
     }
 
     /// <summary>
@@ -234,9 +306,11 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="activity">The activity to schedule.</param>
     /// <param name="owner">The activity execution context that owns the scheduled activity.</param>
     /// <param name="options">The options used to schedule the activity.</param>
-    public async ValueTask ScheduleActivityAsync(IActivity? activity, ActivityExecutionContext? owner, ScheduleWorkOptions? options = default)
+    public async ValueTask ScheduleActivityAsync(IActivity? activity, ActivityExecutionContext? owner, ScheduleWorkOptions? options = null)
     {
-        var activityNode = activity != null ? WorkflowExecutionContext.FindNodeByActivity(activity) : default;
+        var activityNode = activity != null
+            ? WorkflowExecutionContext.FindNodeByActivity(activity) ?? throw new InvalidOperationException("The specified activity is not part of the workflow.")
+            : null;
         await ScheduleActivityAsync(activityNode, owner, options);
     }
 
@@ -246,23 +320,29 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="activityNode">The activity node to schedule.</param>
     /// <param name="owner">The activity execution context that owns the scheduled activity.</param>
     /// <param name="options">The options used to schedule the activity.</param>
-    public async ValueTask ScheduleActivityAsync(ActivityNode? activityNode, ActivityExecutionContext? owner = default, ScheduleWorkOptions? options = default)
+    public async ValueTask ScheduleActivityAsync(ActivityNode? activityNode, ActivityExecutionContext? owner = null, ScheduleWorkOptions? options = null)
     {
         if (this.GetIsBackgroundExecution())
         {
+            // Validate that the specified activity is part of the workflow.
+            if (activityNode != null && !WorkflowExecutionContext.NodeActivityLookup.ContainsKey(activityNode.Activity))
+                throw new InvalidOperationException("The specified activity is not part of the workflow.");
+
             var scheduledActivity = new ScheduledActivity
             {
                 ActivityNodeId = activityNode?.NodeId,
                 OwnerActivityInstanceId = owner?.Id,
-                Options = options != null ? new ScheduledActivityOptions
-                {
-                    CompletionCallback = options?.CompletionCallback?.Method.Name,
-                    Tag = options?.Tag,
-                    ExistingActivityInstanceId = options?.ExistingActivityExecutionContext?.Id,
-                    PreventDuplicateScheduling = options?.PreventDuplicateScheduling ?? false,
-                    Variables = options?.Variables?.ToList(),
-                    Input = options?.Input
-                } : default
+                Options = options != null
+                    ? new ScheduledActivityOptions
+                    {
+                        CompletionCallback = options?.CompletionCallback?.Method.Name,
+                        Tag = options?.Tag,
+                        ExistingActivityInstanceId = options?.ExistingActivityExecutionContext?.Id,
+                        PreventDuplicateScheduling = options?.PreventDuplicateScheduling ?? false,
+                        Variables = options?.Variables?.ToList(),
+                        Input = options?.Input
+                    }
+                    : null
             };
 
             var scheduledActivities = this.GetBackgroundScheduledActivities().ToList();
@@ -304,7 +384,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="completionCallback">The callback to invoke when the activities complete.</param>
     /// <param name="tag">An optional tag to associate with the activity execution.</param>
     /// <param name="variables">An optional list of variables to declare with the activity execution.</param>
-    public ValueTask ScheduleActivities(IEnumerable<IActivity?> activities, ActivityCompletionCallback? completionCallback, object? tag = default, IEnumerable<Variable>? variables = default)
+    public ValueTask ScheduleActivities(IEnumerable<IActivity?> activities, ActivityCompletionCallback? completionCallback, object? tag = null, IEnumerable<Variable>? variables = null)
     {
         var options = new ScheduleWorkOptions
         {
@@ -320,7 +400,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// </summary>
     /// <param name="activities">The activities to schedule.</param>
     /// <param name="options">The options used to schedule the activities.</param>
-    public async ValueTask ScheduleActivities(IEnumerable<IActivity?> activities, ScheduleWorkOptions? options = default)
+    public async ValueTask ScheduleActivities(IEnumerable<IActivity?> activities, ScheduleWorkOptions? options = null)
     {
         foreach (var activity in activities)
             await ScheduleActivityAsync(activity, options);
@@ -332,12 +412,12 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="payloads">The payloads to create bookmarks for.</param>
     /// <param name="callback">An optional callback that is invoked when the bookmark is resumed.</param>
     /// <param name="includeActivityInstanceId">Whether or not the activity instance ID should be included in the bookmark payload.</param>
-    public void CreateBookmarks(IEnumerable<object> payloads, ExecuteActivityDelegate? callback = default, bool includeActivityInstanceId = true)
+    public void CreateBookmarks(IEnumerable<object> payloads, ExecuteActivityDelegate? callback = null, bool includeActivityInstanceId = true)
     {
         foreach (var payload in payloads)
-            CreateBookmark(new CreateBookmarkArgs
+            CreateBookmark(new()
             {
-                Payload = payload,
+                Stimulus = payload,
                 Callback = callback,
                 IncludeActivityInstanceId = includeActivityInstanceId
             });
@@ -347,13 +427,22 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// Adds each bookmark to the list of bookmarks.
     /// </summary>
     /// <param name="bookmarks">The bookmarks to add.</param>
-    public void AddBookmarks(IEnumerable<Bookmark> bookmarks) => _bookmarks.AddRange(bookmarks);
+    public void AddBookmarks(IEnumerable<Bookmark> bookmarks)
+    {
+        WorkflowExecutionContext.Bookmarks.AddRange(bookmarks);
+        Taint();
+    }
 
     /// <summary>
     /// Adds a bookmark to the list of bookmarks.
     /// </summary>
     /// <param name="bookmark">The bookmark to add.</param>
-    public void AddBookmark(Bookmark bookmark) => _bookmarks.Add(bookmark);
+    public void AddBookmark(Bookmark bookmark)
+    {
+        _newBookmarks.Add(bookmark);
+        WorkflowExecutionContext.Bookmarks.Add(bookmark);
+        Taint();
+    }
 
     /// <summary>
     /// Creates a bookmark so that this activity can be resumed at a later time.
@@ -361,9 +450,9 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="callback">An optional callback that is invoked when the bookmark is resumed.</param>
     /// <param name="metadata">Custom properties to associate with the bookmark.</param>
     /// <returns>The created bookmark.</returns>
-    public Bookmark CreateBookmark(ExecuteActivityDelegate callback, IDictionary<string, string>? metadata = default)
+    public Bookmark CreateBookmark(ExecuteActivityDelegate callback, IDictionary<string, string>? metadata = null)
     {
-        return CreateBookmark(new CreateBookmarkArgs
+        return CreateBookmark(new()
         {
             Callback = callback,
             Metadata = metadata
@@ -373,16 +462,16 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// Creates a bookmark so that this activity can be resumed at a later time.
     /// </summary>
-    /// <param name="payload">The payload to associate with the bookmark.</param>
+    /// <param name="stimulus">The payload to associate with the bookmark.</param>
     /// <param name="callback">An optional callback that is invoked when the bookmark is resumed.</param>
     /// <param name="includeActivityInstanceId">Whether or not the activity instance ID should be included in the bookmark payload.</param>
     /// <param name="customProperties">Custom properties to associate with the bookmark.</param>
     /// <returns>The created bookmark.</returns>
-    public Bookmark CreateBookmark(object payload, ExecuteActivityDelegate callback, bool includeActivityInstanceId = true, IDictionary<string, string>? customProperties = default)
+    public Bookmark CreateBookmark(object stimulus, ExecuteActivityDelegate? callback, bool includeActivityInstanceId = true, IDictionary<string, string>? customProperties = null)
     {
-        return CreateBookmark(new CreateBookmarkArgs
+        return CreateBookmark(new()
         {
-            Payload = payload,
+            Stimulus = stimulus,
             Callback = callback,
             IncludeActivityInstanceId = includeActivityInstanceId,
             Metadata = customProperties
@@ -392,15 +481,15 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// Creates a bookmark for the current activity execution context.
     /// </summary>
-    /// <param name="payload">The payload to associate with the bookmark.</param>
+    /// <param name="stimulus">The payload to associate with the bookmark.</param>
     /// <param name="includeActivityInstanceId">Specifies whether to include the activity instance ID in the bookmark information. Defaults to true.</param>
     /// <param name="customProperties">Additional custom properties to associate with the bookmark. Defaults to null.</param>
     /// <returns>The created bookmark.</returns>
-    public Bookmark CreateBookmark(object payload, bool includeActivityInstanceId, IDictionary<string, string>? customProperties = default)
+    public Bookmark CreateBookmark(object stimulus, bool includeActivityInstanceId, IDictionary<string, string>? customProperties = null)
     {
-        return CreateBookmark(new CreateBookmarkArgs
+        return CreateBookmark(new()
         {
-            Payload = payload,
+            Stimulus = stimulus,
             IncludeActivityInstanceId = includeActivityInstanceId,
             Metadata = customProperties
         });
@@ -409,14 +498,14 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// Creates a bookmark so that this activity can be resumed at a later time. 
     /// </summary>
-    /// <param name="payload">The payload to associate with the bookmark.</param>
+    /// <param name="stimulus">The payload to associate with the bookmark.</param>
     /// <param name="metadata">Custom properties to associate with the bookmark.</param>
     /// <returns>The created bookmark.</returns>
-    public Bookmark CreateBookmark(object payload, IDictionary<string, string>? metadata = default)
+    public Bookmark CreateBookmark(object stimulus, IDictionary<string, string>? metadata = null)
     {
-        return CreateBookmark(new CreateBookmarkArgs
+        return CreateBookmark(new()
         {
-            Payload = payload,
+            Stimulus = stimulus,
             Metadata = metadata
         });
     }
@@ -425,18 +514,19 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// Creates a bookmark so that this activity can be resumed at a later time.
     /// Creating a bookmark will automatically suspend the workflow after all pending activities have executed.
     /// </summary>
-    public Bookmark CreateBookmark(CreateBookmarkArgs? options = default)
+    public Bookmark CreateBookmark(CreateBookmarkArgs? options = null)
     {
-        var payload = options?.Payload;
+        var payload = options?.Stimulus;
         var callback = options?.Callback;
         var bookmarkName = options?.BookmarkName ?? Activity.Type;
-        var bookmarkHasher = GetRequiredService<IBookmarkHasher>();
+        var bookmarkHasher = GetRequiredService<IStimulusHasher>();
         var identityGenerator = GetRequiredService<IIdentityGenerator>();
         var includeActivityInstanceId = options?.IncludeActivityInstanceId ?? true;
         var hash = bookmarkHasher.Hash(bookmarkName, payload, includeActivityInstanceId ? Id : null);
+        var bookmarkId = options?.BookmarkId ?? identityGenerator.GenerateId();
 
         var bookmark = new Bookmark(
-            identityGenerator.GenerateId(),
+            bookmarkId,
             bookmarkName,
             hash,
             payload,
@@ -456,7 +546,12 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <summary>
     /// Clear all bookmarks.
     /// </summary>
-    public void ClearBookmarks() => _bookmarks.Clear();
+    public void ClearBookmarks()
+    {
+        _newBookmarks.Clear();
+        WorkflowExecutionContext.Bookmarks.RemoveWhere(x => x.ActivityInstanceId == Id);
+        Taint();
+    }
 
     /// <summary>
     /// Returns a property value associated with the current activity context. 
@@ -569,7 +664,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// </summary>
     /// <param name="output">The output.</param>
     /// <returns>The output value.</returns>
-    public object? Get(Output? output) => output == null ? default : Get(output.MemoryBlockReference());
+    public object? Get(Output? output) => output == null ? null : Get(output.MemoryBlockReference());
 
     /// <summary>
     /// Gets the value of the specified memory block.
@@ -593,7 +688,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     public T? Get<T>(MemoryBlockReference blockReference)
     {
         var value = Get(blockReference);
-        return value != default ? value.ConvertTo<T>() : default;
+        return value != null ? value.ConvertTo<T>() : default;
     }
 
     /// <summary>
@@ -628,7 +723,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="blockReference">The memory block reference.</param>
     /// <param name="value">The value to set.</param>
     /// <param name="configure">An optional callback that can be used to configure the memory block.</param>
-    public void Set(MemoryBlockReference blockReference, object? value, Action<MemoryBlock>? configure = default) => ExpressionExecutionContext.Set(blockReference, value, configure);
+    public void Set(MemoryBlockReference blockReference, object? value, Action<MemoryBlock>? configure = null) => ExpressionExecutionContext.Set(blockReference, value, configure);
 
     /// <summary>
     /// Sets a value at the specified output.
@@ -637,7 +732,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="value">The value to set.</param>
     /// <param name="outputName">The name of the output.</param>
     /// <typeparam name="T">The type of the output.</typeparam>
-    public void Set<T>(Output<T>? output, T? value, [CallerArgumentExpression("output")] string? outputName = default) => Set((Output?)output, value, outputName);
+    public void Set<T>(Output<T>? output, T? value, [CallerArgumentExpression("output")] string? outputName = null) => Set((Output?)output, value, outputName);
 
     /// <summary>
     /// Sets a value at the specified output.
@@ -645,7 +740,7 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// <param name="output">The output.</param>
     /// <param name="value">The value to set.</param>
     /// <param name="outputName">The name of the output.</param>
-    public void Set(Output? output, object? value, [CallerArgumentExpression("output")] string? outputName = default)
+    public void Set(Output? output, object? value, [CallerArgumentExpression("output")] string? outputName = null)
     {
         // Store the value in the expression execution memory block.
         ExpressionExecutionContext.Set(output, value);
@@ -659,14 +754,33 @@ public partial class ActivityExecutionContext : IExecutionContext
     /// </summary>
     public void ClearCompletionCallbacks()
     {
-        var entriesToRemove = WorkflowExecutionContext.CompletionCallbacks.Where(x => x.Owner == this);
+        var entriesToRemove = WorkflowExecutionContext.CompletionCallbacks.Where(x => x.Owner == this).ToList();
         WorkflowExecutionContext.RemoveCompletionCallbacks(entriesToRemove);
     }
 
-    internal void IncrementExecutionCount() => _executionCount++;
+    public void Taint()
+    {
+        if (!IsDirty)
+            IsDirty = true;
+    }
+
+    public void ClearTaint()
+    {
+        if (IsDirty)
+            IsDirty = false;
+    }
+
+    internal void IncrementExecutionCount()
+    {
+        _executionCount++;
+    }
 
     private MemoryBlock? GetMemoryBlock(MemoryBlockReference locationBlockReference)
     {
-        return ExpressionExecutionContext.TryGetBlock(locationBlockReference, out var memoryBlock) ? memoryBlock : default;
+        return ExpressionExecutionContext.TryGetBlock(locationBlockReference, out var memoryBlock) ? memoryBlock : null;
+    }
+
+    void IDisposable.Dispose()
+    {
     }
 }

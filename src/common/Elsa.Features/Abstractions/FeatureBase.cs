@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Elsa.Features.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -31,7 +30,6 @@ public abstract class FeatureBase : IFeature
     /// <summary>
     /// Override this method to configure your feature.
     /// </summary>
-    [RequiresUnreferencedCode("The assembly containing the specified marker type will be scanned for activity types.")]
     public virtual void Configure()
     {
     }

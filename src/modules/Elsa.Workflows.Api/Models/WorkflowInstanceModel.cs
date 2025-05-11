@@ -26,6 +26,11 @@ public class WorkflowInstanceModel
     /// The version of the workflow definition.
     /// </summary>
     public int Version { get; set; }
+
+    /// <summary>
+    /// The ID of the parent workflow instance.
+    /// </summary>
+    public string? ParentWorkflowInstanceId { get; set; }
     
     /// <summary>
     /// The state of the workflow instance.
@@ -41,6 +46,17 @@ public class WorkflowInstanceModel
     /// The sub-status of the workflow instance.
     /// </summary>
     public WorkflowSubStatus SubStatus { get; set; }
+    
+    /// <summary>
+    /// Gets or sets a value indicating whether the workflow instance is actively executing. 
+    /// </summary>
+    /// <remarks>
+    /// This flag is set to <c>true</c> immediately before the workflow begins execution 
+    /// and is set to <c>false</c> once the execution is completed. 
+    /// It can be used to determine if a workflow instance was in-progress in case of unexpected 
+    /// application termination, allowing the system to retry execution upon restarting. 
+    /// </remarks>
+    public bool IsExecuting { get; set; }
     
     /// <summary>
     /// The ID of the workflow instance.

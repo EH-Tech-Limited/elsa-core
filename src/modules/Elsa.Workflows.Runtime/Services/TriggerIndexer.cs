@@ -3,19 +3,17 @@ using Elsa.Expressions.Contracts;
 using Elsa.Extensions;
 using Elsa.Mediator.Contracts;
 using Elsa.Workflows.Activities;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Helpers;
-using Elsa.Workflows.Management.Contracts;
+using Elsa.Workflows.Management;
 using Elsa.Workflows.Management.Entities;
 using Elsa.Workflows.Runtime.Comparers;
-using Elsa.Workflows.Runtime.Contracts;
 using Elsa.Workflows.Runtime.Entities;
 using Elsa.Workflows.Runtime.Filters;
 using Elsa.Workflows.Runtime.Notifications;
 using Microsoft.Extensions.Logging;
 using Open.Linq.AsyncExtensions;
 
-namespace Elsa.Workflows.Runtime.Services;
+namespace Elsa.Workflows.Runtime;
 
 /// <inheritdoc />
 public class TriggerIndexer : ITriggerIndexer
@@ -25,9 +23,10 @@ public class TriggerIndexer : ITriggerIndexer
     private readonly IExpressionEvaluator _expressionEvaluator;
     private readonly IIdentityGenerator _identityGenerator;
     private readonly ITriggerStore _triggerStore;
+    private readonly IActivityRegistry _activityRegistry;
     private readonly INotificationSender _notificationSender;
     private readonly IServiceProvider _serviceProvider;
-    private readonly IBookmarkHasher _hasher;
+    private readonly IStimulusHasher _hasher;
     private readonly ILogger _logger;
 
     /// <summary>
@@ -39,15 +38,17 @@ public class TriggerIndexer : ITriggerIndexer
         IExpressionEvaluator expressionEvaluator,
         IIdentityGenerator identityGenerator,
         ITriggerStore triggerStore,
+        IActivityRegistry activityRegistry,
         INotificationSender notificationSender,
         IServiceProvider serviceProvider,
-        IBookmarkHasher hasher,
+        IStimulusHasher hasher,
         ILogger<TriggerIndexer> logger)
     {
         _activityVisitor = activityVisitor;
         _expressionEvaluator = expressionEvaluator;
         _identityGenerator = identityGenerator;
         _triggerStore = triggerStore;
+        _activityRegistry = activityRegistry;
         _notificationSender = notificationSender;
         _serviceProvider = serviceProvider;
         _hasher = hasher;
@@ -56,10 +57,27 @@ public class TriggerIndexer : ITriggerIndexer
     }
 
     /// <inheritdoc />
+    public async Task DeleteTriggersAsync(TriggerFilter filter, CancellationToken cancellationToken = default)
+    {
+        var triggers = (await _triggerStore.FindManyAsync(filter, cancellationToken)).ToList();
+        var workflowDefinitionVersionIds = triggers.Select(x => x.WorkflowDefinitionVersionId).Distinct().ToList();
+
+        foreach (string workflowDefinitionVersionId in workflowDefinitionVersionIds)
+        {
+            var workflowGraph = await _workflowDefinitionService.FindWorkflowGraphAsync(workflowDefinitionVersionId, cancellationToken);
+
+            if (workflowGraph == null)
+                continue;
+            
+            await DeleteTriggersAsync(workflowGraph.Workflow, cancellationToken);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IndexedWorkflowTriggers> IndexTriggersAsync(WorkflowDefinition definition, CancellationToken cancellationToken = default)
     {
-        var workflow = await _workflowDefinitionService.MaterializeWorkflowAsync(definition, cancellationToken);
-        return await IndexTriggersAsync(workflow, cancellationToken);
+        var workflowGraph = await _workflowDefinitionService.MaterializeWorkflowAsync(definition, cancellationToken);
+        return await IndexTriggersAsync(workflowGraph.Workflow, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -68,7 +86,7 @@ public class TriggerIndexer : ITriggerIndexer
         // Get current triggers
         var currentTriggers = await GetCurrentTriggersAsync(workflow.Identity.DefinitionId, cancellationToken).ToList();
 
-        // Collect new triggers **if workflow is published**.
+        // Collect new triggers **if the workflow is published**.
         var newTriggers = workflow.Publication.IsPublished
             ? await GetTriggersInternalAsync(workflow, cancellationToken).ToListAsync(cancellationToken)
             : new List<StoredTrigger>(0);
@@ -87,52 +105,27 @@ public class TriggerIndexer : ITriggerIndexer
     }
 
     /// <inheritdoc />
-    public async Task<IEnumerable<StoredTrigger>> GetTriggersAsync(WorkflowDefinition definition, CancellationToken cancellationToken = default)
-    {
-        var workflow = await _workflowDefinitionService.MaterializeWorkflowAsync(definition, cancellationToken);
-        return await GetTriggersAsync(workflow, cancellationToken);
-    }
-
-    /// <inheritdoc />
     public async Task<IEnumerable<StoredTrigger>> GetTriggersAsync(Workflow workflow, CancellationToken cancellationToken)
     {
         return await GetTriggersInternalAsync(workflow, cancellationToken).ToListAsync(cancellationToken);
     }
-
-    /// <inheritdoc />
-    public async Task<IndexedWorkflowTriggers> IndexTriggersDeleteWorkflowAsync(ICollection<string> workflowDefinitionIds, CancellationToken cancellationToken = default)
+    
+    private async Task DeleteTriggersAsync(Workflow workflow, CancellationToken cancellationToken = default)
     {
         var emptyTriggerList = new List<StoredTrigger>(0);
-
-        // Get current triggers
-        var currentTriggers = await GetCurrentTriggersAsync(workflowDefinitionIds, cancellationToken).ToList();
-
-        // Diff triggers.
+        var currentTriggers = await GetCurrentTriggersAsync(workflow.Identity.DefinitionId, cancellationToken).ToList();
         var diff = Diff.For(currentTriggers, emptyTriggerList, new WorkflowTriggerEqualityComparer());
-
-        // Replace triggers for the specified workflow.
         await _triggerStore.ReplaceAsync(diff.Removed, diff.Added, cancellationToken);
-
-        //workflow definition already deleted so you do not have one
-        var workflow = new Workflow();
-
         var indexedWorkflow = new IndexedWorkflowTriggers(workflow, emptyTriggerList, currentTriggers, emptyTriggerList);
-
-        // Publish event.
         await _notificationSender.SendAsync(new WorkflowTriggersIndexed(indexedWorkflow), cancellationToken);
-
-        return indexedWorkflow;
-    }
-
-    private async Task<IEnumerable<StoredTrigger>> GetCurrentTriggersAsync(ICollection<string> workflowDefinitionIds, CancellationToken cancellationToken)
-    {
-        var filter = new TriggerFilter { WorkflowDefinitionIds = workflowDefinitionIds };
-        return await _triggerStore.FindManyAsync(filter, cancellationToken);
     }
 
     private async Task<IEnumerable<StoredTrigger>> GetCurrentTriggersAsync(string workflowDefinitionId, CancellationToken cancellationToken)
     {
-        var filter = new TriggerFilter { WorkflowDefinitionId = workflowDefinitionId };
+        var filter = new TriggerFilter
+        {
+            WorkflowDefinitionId = workflowDefinitionId
+        };
         return await _triggerStore.FindManyAsync(filter, cancellationToken);
     }
 
@@ -141,56 +134,41 @@ public class TriggerIndexer : ITriggerIndexer
         var context = new WorkflowIndexingContext(workflow, cancellationToken);
         var nodes = await _activityVisitor.VisitAsync(workflow.Root, cancellationToken);
 
-        // Get a list of activities that are configured as "startable".
-        var startableNodes = nodes
+        // Get a list of trigger activities that are configured as "startable".
+        var triggerActivities = nodes
             .Flatten()
-            .Where(x => x.Activity.GetCanStartWorkflow())
+            .Where(x => x.Activity.GetCanStartWorkflow() && x.Activity is ITrigger)
+            .Select(x => x.Activity)
+            .Cast<ITrigger>()
             .ToList();
 
-        // For each startable node, create triggers.
-        foreach (var node in startableNodes)
+        // For each trigger activity, create a trigger.
+        foreach (var triggerActivity in triggerActivities)
         {
-            var triggers = await GetTriggersAsync(context, node.Activity);
+            var triggers = await CreateWorkflowTriggersAsync(context, triggerActivity);
 
             foreach (var trigger in triggers)
                 yield return trigger;
         }
     }
 
-    private async Task<IEnumerable<StoredTrigger>> GetTriggersAsync(WorkflowIndexingContext context, IActivity activity)
-    {
-        // If the activity implements ITrigger, request its trigger data. Otherwise.
-        if (activity is ITrigger trigger)
-            return await CreateWorkflowTriggersAsync(context, trigger);
-
-        // Else, create a single workflow trigger with no additional data.
-        var simpleTrigger = CreateWorkflowTrigger(context, activity);
-
-        return new[] { simpleTrigger };
-    }
-
-    private StoredTrigger CreateWorkflowTrigger(WorkflowIndexingContext context, IActivity activity)
-    {
-        var workflow = context.Workflow;
-        return new StoredTrigger
-        {
-            Id = _identityGenerator.GenerateId(),
-            WorkflowDefinitionId = workflow.Identity.DefinitionId,
-            WorkflowDefinitionVersionId = workflow.Identity.Id,
-            Name = activity.Type,
-            ActivityId = activity.Id
-        };
-    }
-
     private async Task<ICollection<StoredTrigger>> CreateWorkflowTriggersAsync(WorkflowIndexingContext context, ITrigger trigger)
     {
         var workflow = context.Workflow;
         var cancellationToken = context.CancellationToken;
-        var expressionExecutionContext = await trigger.CreateExpressionExecutionContextAsync(_serviceProvider, context, _expressionEvaluator, _logger);
-
+        var activityTypeName = trigger.Type;
+        var triggerDescriptor = _activityRegistry.Find(activityTypeName, trigger.Version);
+        
+        if (triggerDescriptor == null)
+        {
+            _logger.LogWarning("Could not find activity descriptor for activity type {ActivityType}", activityTypeName);
+            return new List<StoredTrigger>(0);
+        }
+        
+        var expressionExecutionContext = await trigger.CreateExpressionExecutionContextAsync(triggerDescriptor, _serviceProvider, context, _expressionEvaluator, _logger);
         var triggerIndexingContext = new TriggerIndexingContext(context, expressionExecutionContext, trigger, cancellationToken);
         var triggerData = await TryGetTriggerDataAsync(trigger, triggerIndexingContext);
-        var triggerTypeName = trigger.Type;
+        var triggerName = triggerIndexingContext.TriggerName;
 
         // If no trigger payloads were returned, create a null payload.
         if (!triggerData.Any()) triggerData.Add(null!);
@@ -200,9 +178,9 @@ public class TriggerIndexer : ITriggerIndexer
             Id = _identityGenerator.GenerateId(),
             WorkflowDefinitionId = workflow.Identity.DefinitionId,
             WorkflowDefinitionVersionId = workflow.Identity.Id,
-            Name = triggerTypeName,
+            Name = triggerName,
             ActivityId = trigger.Id,
-            Hash = _hasher.Hash(triggerTypeName, payload),
+            Hash = _hasher.Hash(triggerName, payload),
             Payload = payload
         });
 
@@ -220,6 +198,6 @@ public class TriggerIndexer : ITriggerIndexer
             _logger.LogWarning(e, "Failed to get trigger data for activity {ActivityId}", trigger.Id);
         }
 
-        return new List<object>(0);
+        return new(0);
     }
 }

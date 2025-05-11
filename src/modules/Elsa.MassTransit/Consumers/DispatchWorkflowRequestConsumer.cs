@@ -1,7 +1,7 @@
 using Elsa.MassTransit.Messages;
-using Elsa.Workflows.Runtime.Contracts;
-using Elsa.Workflows.Runtime.Options;
-using Elsa.Workflows.Runtime.Parameters;
+using Elsa.Workflows.Management;
+using Elsa.Workflows.Runtime;
+using Elsa.Workflows.Runtime.Messages;
 using JetBrains.Annotations;
 using MassTransit;
 
@@ -11,39 +11,17 @@ namespace Elsa.MassTransit.Consumers;
 /// A consumer of various dispatch message types to asynchronously execute workflows.
 /// </summary>
 [UsedImplicitly]
-public class DispatchWorkflowRequestConsumer :
+public class DispatchWorkflowRequestConsumer(IWorkflowDefinitionService workflowDefinitionService, IWorkflowRuntime workflowRuntime) :
     IConsumer<DispatchWorkflowDefinition>,
-    IConsumer<DispatchWorkflowInstance>,
-    IConsumer<DispatchTriggerWorkflows>,
-    IConsumer<DispatchResumeWorkflows>
+    IConsumer<DispatchWorkflowInstance>
 {
-    private readonly IWorkflowRuntime _workflowRuntime;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DispatchWorkflowRequestConsumer"/> class.
-    /// </summary>
-    public DispatchWorkflowRequestConsumer(IWorkflowRuntime workflowRuntime)
-    {
-        _workflowRuntime = workflowRuntime;
-    }
-
     /// <inheritdoc />
     public async Task Consume(ConsumeContext<DispatchWorkflowDefinition> context)
     {
-        var message = context.Message;
-        var cancellationToken = context.CancellationToken;
-        var options = new StartWorkflowRuntimeParams
-        {
-            CorrelationId = message.CorrelationId,
-            Input = message.Input,
-            Properties = message.Properties,
-            VersionOptions = message.VersionOptions,
-            TriggerActivityId = message.TriggerActivityId,
-            InstanceId = message.InstanceId,
-            CancellationTokens = cancellationToken
-        };
-
-        await _workflowRuntime.TryStartWorkflowAsync(message.DefinitionId, options);
+        if (context.Message.IsExistingInstance)
+            await DispatchExistingWorkflowInstanceAsync(context.Message, context.CancellationToken);
+        else
+            await DispatchNewWorkflowInstanceAsync(context.Message, context.CancellationToken);
     }
 
     /// <inheritdoc />
@@ -51,55 +29,57 @@ public class DispatchWorkflowRequestConsumer :
     {
         var message = context.Message;
         var cancellationToken = context.CancellationToken;
-
-        var options = new ResumeWorkflowRuntimeParams
+        var request = new RunWorkflowInstanceRequest
         {
-            CorrelationId = message.CorrelationId,
             BookmarkId = message.BookmarkId,
-            ActivityId = message.ActivityId,
-            ActivityNodeId = message.ActivityNodeId,
-            ActivityInstanceId = message.ActivityInstanceId,
-            ActivityHash = message.ActivityHash,
+            ActivityHandle = message.ActivityHandle,
             Input = message.Input,
-            Properties = message.Properties,
-            CancellationTokens = cancellationToken
+            Properties = message.Properties
         };
-
-        await _workflowRuntime.ResumeWorkflowAsync(message.InstanceId, options);
+        var workflowClient = await workflowRuntime.CreateClientAsync(message.InstanceId, cancellationToken);
+        await workflowClient.RunInstanceAsync(request, cancellationToken);
     }
 
-    /// <inheritdoc />
-    public async Task Consume(ConsumeContext<DispatchTriggerWorkflows> context)
+    private async Task DispatchNewWorkflowInstanceAsync(DispatchWorkflowDefinition message, CancellationToken cancellationToken)
     {
-        var message = context.Message;
-        var cancellationToken = context.CancellationToken;
-        var options = new TriggerWorkflowsOptions
+        var definitionId = message.DefinitionId;
+        var versionOptions = message.VersionOptions;
+        var definitionVersionId = message.DefinitionVersionId;
+        if (definitionId == null && definitionVersionId == null) throw new ArgumentException("The definition ID is required when dispatching a workflow definition.");
+        if (versionOptions == null && definitionVersionId == null) throw new ArgumentException("The version options are required when dispatching a workflow definition.");
+
+        var workflowGraph = definitionVersionId != null 
+            ? await workflowDefinitionService.FindWorkflowGraphAsync(definitionVersionId, cancellationToken)
+            : await workflowDefinitionService.FindWorkflowGraphAsync(definitionId!, versionOptions!.Value, cancellationToken);
+        
+        if (workflowGraph == null)
+            throw new Exception($"Workflow definition version with ID '{definitionVersionId}' not found");
+
+        var workflowClient = await workflowRuntime.CreateClientAsync(message.InstanceId, cancellationToken);
+        var createWorkflowInstanceRequest = new CreateAndRunWorkflowInstanceRequest
         {
-            CorrelationId = message.CorrelationId,
-            WorkflowInstanceId = message.WorkflowInstanceId,
-            ActivityInstanceId = message.ActivityInstanceId,
-            Input = message.Input,
+            WorkflowDefinitionHandle = workflowGraph.Workflow.DefinitionHandle,
             Properties = message.Properties,
-            CancellationTokens = cancellationToken
+            CorrelationId = message.CorrelationId,
+            Input = message.Input,
+            ParentId = message.ParentWorkflowInstanceId,
+            TriggerActivityId = message.TriggerActivityId
         };
-        await _workflowRuntime.TriggerWorkflowsAsync(message.ActivityTypeName, message.BookmarkPayload, options);
+        await workflowClient.CreateAndRunInstanceAsync(createWorkflowInstanceRequest, cancellationToken);
     }
 
-    /// <inheritdoc />
-    public async Task Consume(ConsumeContext<DispatchResumeWorkflows> context)
+    private async Task DispatchExistingWorkflowInstanceAsync(DispatchWorkflowDefinition message, CancellationToken cancellationToken)
     {
-        var message = context.Message;
-        var cancellationToken = context.CancellationToken;
+        if (string.IsNullOrWhiteSpace(message.InstanceId)) throw new ArgumentException("The instance ID is required when dispatching an existing workflow instance.");
 
-        var options = new TriggerWorkflowsOptions
+        var request = new RunWorkflowInstanceRequest
         {
-            CorrelationId = message.CorrelationId,
-            WorkflowInstanceId = message.WorkflowInstanceId,
+            TriggerActivityId = message.TriggerActivityId,
             Input = message.Input,
-            Properties = message.Properties,
-            CancellationTokens = cancellationToken
+            Properties = message.Properties
         };
 
-        await _workflowRuntime.ResumeWorkflowsAsync(message.ActivityTypeName, message.BookmarkPayload, options);
+        var workflowClient = await workflowRuntime.CreateClientAsync(message.InstanceId, cancellationToken);
+        await workflowClient.RunInstanceAsync(request, cancellationToken);
     }
 }

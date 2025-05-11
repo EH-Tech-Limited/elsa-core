@@ -1,6 +1,5 @@
 using Elsa.Common.Services;
 using Elsa.Extensions;
-using Elsa.Workflows.Runtime.Contracts;
 using Elsa.Workflows.Runtime.Entities;
 using Elsa.Workflows.Runtime.Filters;
 using Elsa.Workflows.Runtime.OrderDefinitions;
@@ -33,6 +32,13 @@ public class MemoryActivityExecutionStore : IActivityExecutionStore
     public Task SaveManyAsync(IEnumerable<ActivityExecutionRecord> records, CancellationToken cancellationToken = default)
     {
         _store.SaveMany(records, x => x.Id);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task AddManyAsync(IEnumerable<ActivityExecutionRecord> records, CancellationToken cancellationToken = default)
+    {
+        _store.AddMany(records, x => x.Id);
         return Task.CompletedTask;
     }
 

@@ -6,15 +6,11 @@ using MongoDB.Driver;
 
 namespace Elsa.MongoDb.Modules.Identity;
 
-internal class CreateIndices : IHostedService
+internal class CreateIndices(IServiceProvider serviceProvider) : IHostedService
 {
-    private readonly IServiceProvider _serviceProvider;
-
-    public CreateIndices(IServiceProvider serviceProvider) => _serviceProvider = serviceProvider;
-
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        using var scope = _serviceProvider.CreateScope();
+        using var scope = serviceProvider.CreateScope();
         return Task.WhenAll(
             CreateApplicationIndices(scope, cancellationToken),
             CreateUserIndices(scope, cancellationToken),
@@ -28,28 +24,33 @@ internal class CreateIndices : IHostedService
 
     private static Task CreateApplicationIndices(IServiceScope serviceScope, CancellationToken cancellationToken)
     {
-        var applicationCollection = serviceScope.ServiceProvider.GetService<MongoCollectionBase<Application>>();
+        var applicationCollection = serviceScope.ServiceProvider.GetService<IMongoCollection<Application>>();
         if (applicationCollection == null) return Task.CompletedTask;
-        
+
         return IndexHelpers.CreateAsync(
             applicationCollection,
             async (collection, indexBuilder) =>
                 await collection.Indexes.CreateManyAsync(
                     new List<CreateIndexModel<Application>>
                     {
-                        new(indexBuilder.Ascending(x => x.ClientId), 
-                            new CreateIndexOptions {Unique = true}),
-                        new(indexBuilder.Ascending(x => x.Name), 
-                            new CreateIndexOptions {Unique = true})
+                        new(indexBuilder.Ascending(x => x.ClientId), new CreateIndexOptions
+                        {
+                            Unique = true
+                        }),
+                        new(indexBuilder.Ascending(x => x.Name), new CreateIndexOptions
+                        {
+                            Unique = true
+                        }),
+                        new(indexBuilder.Ascending(x => x.TenantId))
                     },
                     cancellationToken));
     }
-    
+
     private static Task CreateUserIndices(IServiceScope serviceScope, CancellationToken cancellationToken)
     {
-        var userCollection = serviceScope.ServiceProvider.GetService<MongoCollectionBase<User>>();
+        var userCollection = serviceScope.ServiceProvider.GetService<IMongoCollection<User>>();
         if (userCollection == null) return Task.CompletedTask;
-        
+
         return IndexHelpers.CreateAsync(
             userCollection,
             async (collection, indexBuilder) =>
@@ -57,8 +58,12 @@ internal class CreateIndices : IHostedService
                 await collection.Indexes.CreateManyAsync(
                     new List<CreateIndexModel<User>>
                     {
-                        new(indexBuilder.Ascending(x => x.Name), 
-                            new CreateIndexOptions {Unique = true})
+                        new(indexBuilder.Ascending(x => x.Name),
+                            new CreateIndexOptions
+                            {
+                                Unique = true
+                            }),
+                        new(indexBuilder.Ascending(x => x.TenantId))
                     },
                     cancellationToken);
             });
@@ -66,7 +71,7 @@ internal class CreateIndices : IHostedService
 
     private static Task CreateRoleIndices(IServiceScope serviceScope, CancellationToken cancellationToken)
     {
-        var roleCollection = serviceScope.ServiceProvider.GetService<MongoCollectionBase<Role>>();
+        var roleCollection = serviceScope.ServiceProvider.GetService<IMongoCollection<Role>>();
         if (roleCollection == null) return Task.CompletedTask;
 
         return IndexHelpers.CreateAsync(
@@ -75,8 +80,12 @@ internal class CreateIndices : IHostedService
                 await collection.Indexes.CreateManyAsync(
                     new List<CreateIndexModel<Role>>
                     {
-                        new(indexBuilder.Ascending(x => x.Name), 
-                            new CreateIndexOptions {Unique = true})
+                        new(indexBuilder.Ascending(x => x.Name),
+                            new CreateIndexOptions
+                            {
+                                Unique = true
+                            }),
+                        new(indexBuilder.Ascending(x => x.TenantId))
                     },
                     cancellationToken));
     }

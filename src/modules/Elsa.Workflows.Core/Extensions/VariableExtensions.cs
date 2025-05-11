@@ -1,9 +1,13 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Unicode;
 using Elsa.Expressions.Helpers;
-using Elsa.Workflows.Contracts;
+using Elsa.Expressions.Models;
+using Elsa.Workflows;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Serialization.Converters;
-using Elsa.Workflows.Services;
 
 // ReSharper disable once CheckNamespace
 namespace Elsa.Extensions;
@@ -13,15 +17,28 @@ namespace Elsa.Extensions;
 /// </summary>
 public static class VariableExtensions
 {
-    /// <summary>
-    /// Configures the variable to use the <see cref="WorkflowStorageDriver"/>.
-    /// </summary>
-    public static Variable WithWorkflowStorage(this Variable variable) => variable.WithStorage<WorkflowStorageDriver>();
+    private static JsonSerializerOptions? _serializerOptions;
+
+    private static JsonSerializerOptions SerializerOptions =>
+        _serializerOptions ??= new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            ReferenceHandler = ReferenceHandler.Preserve,
+            PropertyNameCaseInsensitive = true,
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+        }.WithConverters(
+            new JsonStringEnumConverter(),
+            new ExpandoObjectConverterFactory());
 
     /// <summary>
-    /// Configures the variable to use the <see cref="WorkflowStorageDriver"/>.
+    /// Configures the variable to use the <see cref="WorkflowInstanceStorageDriver"/>.
     /// </summary>
-    public static Variable<T> WithWorkflowStorage<T>(this Variable<T> variable) => (Variable<T>)variable.WithStorage<WorkflowStorageDriver>();
+    public static Variable WithWorkflowStorage(this Variable variable) => variable.WithStorage<WorkflowInstanceStorageDriver>();
+
+    /// <summary>
+    /// Configures the variable to use the <see cref="WorkflowInstanceStorageDriver"/>.
+    /// </summary>
+    public static Variable<T> WithWorkflowStorage<T>(this Variable<T> variable) => (Variable<T>)variable.WithStorage<WorkflowInstanceStorageDriver>();
 
     /// <summary>
     /// Configures the variable to use the <see cref="MemoryStorageDriver"/>.
@@ -46,17 +63,47 @@ public static class VariableExtensions
         variable.StorageDriverType = storageDriverType;
         return variable;
     }
+    
+    public static void Set(this Variable variable, ActivityExecutionContext context, object? value)
+    {
+        var parsedValue = variable.ParseValue(value);
+        // Set the value.
+        ((MemoryBlockReference)variable).Set(context, parsedValue);
+    }
 
     /// <summary>
     /// Converts the specified value into a type that is compatible with the variable.
     /// </summary>
-    public static object ParseValue(this Variable variable, object value)
+    [RequiresUnreferencedCode("Calls System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)")]
+    public static object? ParseValue(this Variable variable, object? value)
     {
-        var genericType = variable.GetType().GenericTypeArguments.FirstOrDefault();
-        var jsonSerializerOptions = new JsonSerializerOptions();
-        jsonSerializerOptions.Converters.Add(new ExpandoObjectConverterFactory());
-        var converterOptions = new ObjectConverterOptions(jsonSerializerOptions);
-        return genericType == null ? value : value.ConvertTo(genericType, converterOptions)!;
+        var genericType = variable.GetType();
+        return ParseValue(genericType, value);
+    }
+    
+    public static object? ParseValue(Type type, object? value)
+    {
+        var genericType = type.GenericTypeArguments.FirstOrDefault();
+        var converterOptions = new ObjectConverterOptions(SerializerOptions);
+        return genericType == null ? value : value?.ConvertTo(genericType, converterOptions);
+    }
+    
+    /// <summary>
+    /// Converts the specified value into a type that is compatible with the variable.
+    /// </summary>
+    [RequiresUnreferencedCode("Calls System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)")]
+    public static bool TryParseValue(this Variable variable, object? value, out object? parsedValue)
+    {
+        try
+        {
+            parsedValue = variable.ParseValue(value);
+            return true;
+        }
+        catch
+        {
+            parsedValue = null;
+            return false;
+        }
     }
 
     /// <summary>

@@ -4,13 +4,10 @@ using Elsa.Features.Attributes;
 using Elsa.Features.Services;
 using Elsa.MassTransit.ConsumerDefinitions;
 using Elsa.MassTransit.Consumers;
-using Elsa.MassTransit.Contracts;
-using Elsa.MassTransit.Formatters;
 using Elsa.MassTransit.Options;
 using Elsa.MassTransit.Services;
-using Elsa.Workflows.Runtime.Contracts;
+using Elsa.Workflows.Runtime;
 using Elsa.Workflows.Runtime.Features;
-using Elsa.Workflows.Runtime.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Elsa.MassTransit.Features;
@@ -26,37 +23,53 @@ public class MassTransitWorkflowDispatcherFeature : FeatureBase
     public MassTransitWorkflowDispatcherFeature(IModule module) : base(module)
     {
     }
+
+    /// <summary>
+    /// Configures the MassTransit workflow dispatcher.
+    /// </summary>
+    [Obsolete("Use ConfigureWorkflowDispatcherOptions instead.")]
+    public Action<MassTransitWorkflowDispatcherOptions> ConfigureDispatcherOptions
+    {
+        get => ConfigureWorkflowDispatcherOptions; 
+        set => ConfigureWorkflowDispatcherOptions = value;
+    }
     
     /// <summary>
     /// Configures the MassTransit workflow dispatcher.
     /// </summary>
-    public Action<MassTransitWorkflowDispatcherOptions>? ConfigureDispatcherOptions { get; set; }
-
+    public Action<MassTransitWorkflowDispatcherOptions> ConfigureWorkflowDispatcherOptions { get; set; } = _ => { };
+    
     /// <summary>
-    /// A factory that creates a <see cref="IEndpointChannelFormatter"/>.
+    /// Configures the MassTransit stimulus dispatcher.
     /// </summary>
-    public Func<IServiceProvider, IEndpointChannelFormatter> ChannelQueueFormatterFactory { get; set; } = _ => new DefaultEndpointChannelFormatter();
+    public Action<MassTransitStimulusDispatcherOptions> ConfigureStimulusDispatcherOptions { get; set; } = _ => { };
 
     /// <inheritdoc />
     public override void Configure()
     {
         Module.AddMassTransitConsumer<DispatchWorkflowRequestConsumer, DispatchWorkflowRequestConsumerDefinition>();
         Module.AddMassTransitConsumer<DispatchCancelWorkflowsRequestConsumer>("elsa-dispatch-cancel-workflow", true);
-        Module.Configure<WorkflowRuntimeFeature>(f => f.WorkflowDispatcher = sp =>
+        Module.AddMassTransitConsumer<DispatchStimulusRequestConsumer, DispatchStimulusRequestConsumerDefinition>("elsa-dispatch-stimulus");
+        Module.Configure<WorkflowRuntimeFeature>(f =>
         {
-            var decoratedService = ActivatorUtilities.CreateInstance<MassTransitWorkflowDispatcher>(sp);
-            return ActivatorUtilities.CreateInstance<ValidatingWorkflowDispatcher>(sp, decoratedService);
+            f.WorkflowDispatcher = sp =>
+            {
+                var decoratedService = ActivatorUtilities.CreateInstance<MassTransitWorkflowDispatcher>(sp);
+                return ActivatorUtilities.CreateInstance<ValidatingWorkflowDispatcher>(sp, decoratedService);
+            };
+
+            f.WorkflowCancellationDispatcher = sp => sp.GetRequiredService<MassTransitWorkflowCancellationDispatcher>();
+            f.StimulusDispatcher = sp => sp.GetRequiredService<MassTransitStimulusDispatcher>();
         });
     }
 
     /// <inheritdoc />
     public override void Apply()
     {
-        var options = Services.AddOptions<MassTransitWorkflowDispatcherOptions>();
+        Services.Configure(ConfigureWorkflowDispatcherOptions);
+        Services.Configure(ConfigureStimulusDispatcherOptions);
         
-        if (ConfigureDispatcherOptions != null)
-            options.Configure(ConfigureDispatcherOptions);
-        
-        Services.AddSingleton(ChannelQueueFormatterFactory);
+        Services.AddScoped<MassTransitWorkflowCancellationDispatcher>();
+        Services.AddScoped<MassTransitStimulusDispatcher>();
     }
 }

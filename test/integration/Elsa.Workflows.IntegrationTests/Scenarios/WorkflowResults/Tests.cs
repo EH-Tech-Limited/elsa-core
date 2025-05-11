@@ -1,9 +1,7 @@
 using Elsa.Testing.Shared;
 using Elsa.Workflows.Activities;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Memory;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 using Xunit.Abstractions;
 
 namespace Elsa.Workflows.IntegrationTests.Scenarios.WorkflowResults;
@@ -25,7 +23,7 @@ public class Tests
     {
         await _services.PopulateRegistriesAsync();
         var expectedValue = "Some value";
-        var variable1 = new Variable();
+        var variable1 = new Variable("Variable1");
         
         var workflow = Workflow.FromActivity(new Sequence
         {
@@ -48,7 +46,7 @@ public class Tests
     {
         await _services.PopulateRegistriesAsync();
         var expectedValue = "Some value";
-        var variable = new Variable<string>();
+        var variable = new Variable<string>("Variable", "");
         
         var workflow = Workflow.FromActivity(new Sequence
         {

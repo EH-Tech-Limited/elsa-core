@@ -18,5 +18,6 @@ internal static class TemplateContextExtensions
                 return filter.ProcessAsync(input, arguments, ctx);
             });
         }
+        options.ConfigureFilters(templateContext);
     }
 }

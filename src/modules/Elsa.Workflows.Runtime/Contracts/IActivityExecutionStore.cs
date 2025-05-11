@@ -2,26 +2,22 @@ using Elsa.Workflows.Runtime.Entities;
 using Elsa.Workflows.Runtime.Filters;
 using Elsa.Workflows.Runtime.OrderDefinitions;
 
-namespace Elsa.Workflows.Runtime.Contracts;
+namespace Elsa.Workflows.Runtime;
 
 /// <summary>
 /// Stores activity execution records.
 /// </summary>
-public interface IActivityExecutionStore
+public interface IActivityExecutionStore : ILogRecordStore<ActivityExecutionRecord>
 {
     /// <summary>
-    /// Saves the specified activity execution record.
+    /// Adds or updates the specified <see cref="ActivityExecutionRecord"/> in the persistence store.
     /// </summary>
     /// <param name="record">The activity execution record.</param>
     /// <param name="cancellationToken">An optional cancellation token.</param>
+    /// <remarks>
+    /// If the record does not already exist, it is added to the store; if it does exist, its existing entry is updated.
+    /// </remarks>
     Task SaveAsync(ActivityExecutionRecord record, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Saves the specified activity execution records.
-    /// </summary>
-    /// <param name="records">The activity execution records.</param>
-    /// <param name="cancellationToken">An optional cancellation token.</param>
-    Task SaveManyAsync(IEnumerable<ActivityExecutionRecord> records, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Finds an activity execution record matching the specified filter.

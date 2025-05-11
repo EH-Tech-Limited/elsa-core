@@ -2,9 +2,9 @@ using System.Diagnostics;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows.Behaviors;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Helpers;
 using Elsa.Workflows.Models;
+using Elsa.Workflows.Serialization.Converters;
 using JetBrains.Annotations;
 
 namespace Elsa.Workflows;
@@ -17,12 +17,11 @@ namespace Elsa.Workflows;
 public abstract class Activity : IActivity, ISignalHandler
 {
     private readonly ICollection<SignalHandlerRegistration> _signalReceivedHandlers = new List<SignalHandlerRegistration>();
-    private readonly ICollection<SignalHandlerRegistration> _signalCapturedHandlers = new List<SignalHandlerRegistration>();
 
     /// <summary>
     /// Constructor.
     /// </summary>
-    protected Activity(string? source = default, int? line = default)
+    protected Activity(string? source = null, int? line = null)
     {
         this.SetSource(source, line);
         Type = ActivityTypeNameHelper.GenerateTypeName(GetType());
@@ -31,17 +30,17 @@ public abstract class Activity : IActivity, ISignalHandler
     }
 
     /// <inheritdoc />
-    protected Activity(string activityType, int version = 1, string? source = default, int? line = default) : this(source, line)
+    protected Activity(string activityType, int version = 1, string? source = null, int? line = null) : this(source, line)
     {
         Type = activityType;
         Version = version;
     }
 
     /// <inheritdoc />
-    public string Id { get; set; } = default!;
+    public string Id { get; set; } = null!;
     
     /// <inheritdoc />
-    public string NodeId { get; set; } = default!;
+    public string NodeId { get; set; } = null!;
     
     /// <inheritdoc />
     public string? Name { get; set; }
@@ -74,8 +73,16 @@ public abstract class Activity : IActivity, ISignalHandler
         get => this.GetRunAsynchronously();
         set => this.SetRunAsynchronously(value);
     }
+    
+    [JsonIgnore]
+    public string? CommitStrategy
+    {
+        get => this.GetCommitStrategy();
+        set => this.SetCommitStrategy(value);
+    }
 
     /// <inheritdoc />
+    [JsonConverter(typeof(PolymorphicObjectConverterFactory))]
     public IDictionary<string, object> CustomProperties { get; set; } = new Dictionary<string, object>();
     
     /// <inheritdoc />
@@ -83,6 +90,7 @@ public abstract class Activity : IActivity, ISignalHandler
     public IDictionary<string, object> SyntheticProperties { get; set; } = new Dictionary<string, object>();
     
     /// <inheritdoc />
+    [JsonConverter(typeof(PolymorphicObjectConverterFactory))]
     public IDictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
 
     /// <summary>
@@ -161,44 +169,6 @@ public abstract class Activity : IActivity, ISignalHandler
             return ValueTask.CompletedTask;
         });
     }
-    
-    /// <summary>
-    /// Override this method to handle any signals sent from downstream activities.
-    /// </summary>
-    protected virtual ValueTask OnCaptureSignalAsync(object signal, SignalContext context)
-    {
-        OnSignalCaptured(signal, context);
-        return ValueTask.CompletedTask;
-    }
-
-    /// <summary>
-    /// Override this method to handle any signals sent from downstream activities.
-    /// </summary>
-    protected virtual void OnSignalCaptured(object signal, SignalContext context)
-    {
-    }
-
-    /// <summary>
-    /// Register a signal handler delegate.
-    /// </summary>
-    protected void OnSignalCaptured(Type signalType, Func<object, SignalContext, ValueTask> handler) => _signalCapturedHandlers.Add(new SignalHandlerRegistration(signalType, handler));
-
-    /// <summary>
-    /// Register a signal handler delegate.
-    /// </summary>
-    protected void OnSignalCaptured<T>(Func<T, SignalContext, ValueTask> handler) => OnSignalCaptured(typeof(T), (signal, context) => handler((T)signal, context));
-
-    /// <summary>
-    /// Register a signal handler delegate.
-    /// </summary>
-    protected void OnSignalCaptured<T>(Action<T, SignalContext> handler)
-    {
-        OnSignalCaptured<T>((signal, context) =>
-        {
-            handler(signal, context);
-            return ValueTask.CompletedTask;
-        });
-    }
 
     /// <summary>
     /// Notify the workflow that this activity completed.
@@ -220,23 +190,7 @@ public abstract class Activity : IActivity, ISignalHandler
         // Invoke behaviors.
         foreach (var behavior in Behaviors) await behavior.ExecuteAsync(context);
     }
-
-    async ValueTask ISignalHandler.CaptureSignalAsync(object signal, SignalContext context)
-    {
-        // Give derived activity a chance to do something with the signal.
-        await OnCaptureSignalAsync(signal, context);
-
-        // Invoke registered signal delegates for this particular type of signal.
-        var signalType = signal.GetType();
-        var handlers = _signalCapturedHandlers.Where(x => x.SignalType == signalType);
-
-        foreach (var registration in handlers)
-            await registration.Handler(signal, context);
-
-        // Invoke behaviors.
-        foreach (var behavior in Behaviors) await behavior.CaptureSignalAsync(signal, context);
-    }
-
+    
     async ValueTask ISignalHandler.ReceiveSignalAsync(object signal, SignalContext context)
     {
         // Give derived activity a chance to do something with the signal.

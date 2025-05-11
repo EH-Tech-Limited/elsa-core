@@ -1,12 +1,10 @@
 using Elsa.Mediator;
 using Elsa.Mediator.Contracts;
 using Elsa.Workflows.Runtime.Commands;
-using Elsa.Workflows.Runtime.Contracts;
-using Elsa.Workflows.Runtime.Models;
 using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 
-namespace Elsa.Workflows.Runtime.Services;
+namespace Elsa.Workflows.Runtime;
 
 /// <summary>
 /// A simple implementation that queues the specified request for workflow execution on a non-durable background worker.
@@ -24,9 +22,9 @@ public class BackgroundWorkflowDispatcher : IWorkflowDispatcher
     }
 
     /// <inheritdoc />
-    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchWorkflowDefinitionRequest request, DispatchWorkflowOptions? options = default, CancellationToken cancellationToken = default)
+    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchWorkflowDefinitionRequest request, DispatchWorkflowOptions? options = null, CancellationToken cancellationToken = default)
     {
-        var command = new DispatchWorkflowDefinitionCommand(request.DefinitionId, request.VersionOptions)
+        var command = new DispatchWorkflowDefinitionCommand(request.DefinitionVersionId)
         {
             Input = request.Input,
             Properties = request.Properties,
@@ -40,14 +38,11 @@ public class BackgroundWorkflowDispatcher : IWorkflowDispatcher
     }
 
     /// <inheritdoc />
-    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchWorkflowInstanceRequest request, DispatchWorkflowOptions? options = default, CancellationToken cancellationToken = default)
+    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchWorkflowInstanceRequest request, DispatchWorkflowOptions? options = null, CancellationToken cancellationToken = default)
     {
         var command = new DispatchWorkflowInstanceCommand(request.InstanceId){
             BookmarkId = request.BookmarkId,
-            ActivityId = request.ActivityId,
-            ActivityNodeId = request.ActivityNodeId,
-            ActivityInstanceId = request.ActivityInstanceId,
-            ActivityHash = request.ActivityHash,
+            ActivityHandle = request.ActivityHandle,
             Input = request.Input,
             Properties = request.Properties,
             CorrelationId = request.CorrelationId};
@@ -57,7 +52,7 @@ public class BackgroundWorkflowDispatcher : IWorkflowDispatcher
     }
 
     /// <inheritdoc />
-    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchTriggerWorkflowsRequest request, DispatchWorkflowOptions? options = default, CancellationToken cancellationToken = default)
+    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchTriggerWorkflowsRequest request, DispatchWorkflowOptions? options = null, CancellationToken cancellationToken = default)
     {
         var command = new DispatchTriggerWorkflowsCommand(request.ActivityTypeName, request.BookmarkPayload)
         {
@@ -72,7 +67,7 @@ public class BackgroundWorkflowDispatcher : IWorkflowDispatcher
     }
 
     /// <inheritdoc />
-    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchResumeWorkflowsRequest request, DispatchWorkflowOptions? options = default, CancellationToken cancellationToken = default)
+    public async Task<DispatchWorkflowResponse> DispatchAsync(DispatchResumeWorkflowsRequest request, DispatchWorkflowOptions? options = null, CancellationToken cancellationToken = default)
     {
         var command = new DispatchResumeWorkflowsCommand(request.ActivityTypeName, request.BookmarkPayload)
         {

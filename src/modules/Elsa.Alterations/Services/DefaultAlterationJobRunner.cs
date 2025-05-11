@@ -3,10 +3,10 @@ using Elsa.Alterations.Core.Entities;
 using Elsa.Alterations.Core.Enums;
 using Elsa.Alterations.Core.Filters;
 using Elsa.Alterations.Core.Notifications;
-using Elsa.Common.Contracts;
+using Elsa.Common;
 using Elsa.Mediator.Contracts;
 
-namespace Elsa.Alterations.Core.Services;
+namespace Elsa.Alterations.Services;
 
 /// <inheritdoc />
 public class DefaultAlterationJobRunner : IAlterationJobRunner

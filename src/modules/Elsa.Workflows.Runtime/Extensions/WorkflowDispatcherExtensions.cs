@@ -1,4 +1,3 @@
-using Elsa.Workflows.Runtime.Models;
 using Elsa.Workflows.Runtime.Requests;
 using Elsa.Workflows.Runtime.Responses;
 
@@ -15,7 +14,7 @@ public static class WorkflowDispatcherExtensions
     /// </summary>
     public static Task<DispatchWorkflowResponse> DispatchAsync(this IWorkflowDispatcher workflowDispatcher, DispatchWorkflowDefinitionRequest request, CancellationToken cancellationToken = default)
     {
-        return workflowDispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), cancellationToken);
+        return workflowDispatcher.DispatchAsync(request, new(), cancellationToken);
     }
 
     /// <summary>
@@ -23,7 +22,7 @@ public static class WorkflowDispatcherExtensions
     /// </summary>
     public static Task<DispatchWorkflowResponse> DispatchAsync(this IWorkflowDispatcher workflowDispatcher, DispatchWorkflowInstanceRequest request, CancellationToken cancellationToken = default)
     {
-        return workflowDispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), cancellationToken);
+        return workflowDispatcher.DispatchAsync(request, new(), cancellationToken);
     }
 
     /// <summary>
@@ -31,7 +30,7 @@ public static class WorkflowDispatcherExtensions
     /// </summary>
     public static Task<DispatchWorkflowResponse> DispatchAsync(this IWorkflowDispatcher workflowDispatcher, DispatchTriggerWorkflowsRequest request, CancellationToken cancellationToken = default)
     {
-        return workflowDispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), cancellationToken);
+        return workflowDispatcher.DispatchAsync(request, new(), cancellationToken);
     }
 
     /// <summary>
@@ -39,6 +38,6 @@ public static class WorkflowDispatcherExtensions
     /// </summary>
     public static Task<DispatchWorkflowResponse> DispatchAsync(this IWorkflowDispatcher workflowDispatcher, DispatchResumeWorkflowsRequest request, CancellationToken cancellationToken = default)
     {
-        return workflowDispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), cancellationToken);
+        return workflowDispatcher.DispatchAsync(request, new(), cancellationToken);
     }
 }

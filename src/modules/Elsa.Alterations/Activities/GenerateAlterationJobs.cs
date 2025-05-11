@@ -5,17 +5,13 @@ using Elsa.Alterations.Core.Entities;
 using Elsa.Alterations.Core.Enums;
 using Elsa.Alterations.Core.Filters;
 using Elsa.Alterations.Core.Models;
-using Elsa.Common.Contracts;
+using Elsa.Common;
+using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Exceptions;
-using Elsa.Workflows.Management.Contracts;
-using Elsa.Workflows.Management.Filters;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
-using Elsa.Workflows.Runtime.Contracts;
-using Elsa.Workflows.Runtime.Filters;
 
 namespace Elsa.Alterations.Activities;
 
@@ -23,8 +19,8 @@ namespace Elsa.Alterations.Activities;
 /// Submits an alteration plan for execution.
 /// </summary>
 [Browsable(false)]
-[Activity("Elsa", "Alterations", "Generates jobs for the specified Alteration Plan", Kind = ActivityKind.Job)]
-public class GenerateAlterationJobs : CodeActivity
+[Activity("Elsa", "Alterations", "Generates jobs for the specified Alteration Plan", Kind = ActivityKind.Task)]
+public class GenerateAlterationJobs : CodeActivity<int>
 {
     /// <inheritdoc />
     public GenerateAlterationJobs([CallerFilePath] string? source = default, [CallerLineNumber] int? line = default) : base(source, line)
@@ -47,10 +43,14 @@ public class GenerateAlterationJobs : CodeActivity
     {
         var plan = await GetPlanAsync(context);
         await UpdatePlanStatusAsync(context, plan);
-        var workflowInstanceIds = await FindMatchingWorkflowInstanceIdsAsync(context, plan.WorkflowInstanceFilter);
-        await GenerateJobsAsync(context, plan, workflowInstanceIds);
+        var workflowInstanceIds = (await FindMatchingWorkflowInstanceIdsAsync(context, plan.WorkflowInstanceFilter)).ToList();
+
+        if (workflowInstanceIds.Any())
+            await GenerateJobsAsync(context, plan, workflowInstanceIds);
+
+        context.SetResult(workflowInstanceIds.Count);
     }
-    
+
     private async Task<AlterationPlan> GetPlanAsync(ActivityExecutionContext context)
     {
         var cancellationToken = context.CancellationToken;
@@ -63,8 +63,8 @@ public class GenerateAlterationJobs : CodeActivity
         var plan = await alterationPlanStore.FindAsync(planFilter, cancellationToken);
 
         if (plan == null)
-            throw new FaultException($"Alteration Plan with ID {planId} not found.");
-        
+            throw new FaultException(AlterationFaultCodes.PlanNotFound, AlterationFaultCategories.Alteration, DefaultFaultTypes.System, $"Alteration Plan with ID {planId} not found.");
+
         return plan;
     }
 
@@ -79,39 +79,10 @@ public class GenerateAlterationJobs : CodeActivity
     private async Task<IEnumerable<string>> FindMatchingWorkflowInstanceIdsAsync(ActivityExecutionContext context, AlterationWorkflowInstanceFilter filter)
     {
         var cancellationToken = context.CancellationToken;
-        var workflowInstanceFilter = new WorkflowInstanceFilter
-        {
-            Ids = filter.WorkflowInstanceIds?.ToList(),
-            DefinitionVersionIds = filter.DefinitionVersionIds?.ToList(),
-            CorrelationIds = filter.CorrelationIds?.ToList(),
-            HasIncidents = filter.HasIncidents,
-            TimestampFilters = filter.TimestampFilters?.ToList(),
-        };
-        var activityExecutionFilters = filter.ActivityFilters?.Select(x => new ActivityExecutionRecordFilter
-        {
-            ActivityId = x.Id,
-            ActivityNodeId = x.NodeId,
-            Name = x.Name,
-            Status = x.Status,
-        }).ToList();
-
-        var workflowInstanceStore = context.GetRequiredService<IWorkflowInstanceStore>();
-        var activityExecutionStore = context.GetRequiredService<IActivityExecutionStore>();
-        var workflowInstanceIds = workflowInstanceFilter.IsEmpty ? Enumerable.Empty<string>().ToHashSet() : (await workflowInstanceStore.FindManyIdsAsync(workflowInstanceFilter, cancellationToken)).ToHashSet();
-
-        if (activityExecutionFilters != null)
-        {
-            foreach (ActivityExecutionRecordFilter activityExecutionFilter in activityExecutionFilters.Where(x => !x.IsEmpty))
-            {
-                var activityExecutionRecords = await activityExecutionStore.FindManySummariesAsync(activityExecutionFilter, cancellationToken);
-                var matchingWorkflowInstanceIds = activityExecutionRecords.Select(x => x.WorkflowInstanceId).ToHashSet();
-                workflowInstanceIds.UnionWith(matchingWorkflowInstanceIds);
-            }
-        }
-        
-        return workflowInstanceIds;
+        var workflowInstanceFinder = context.GetRequiredService<IWorkflowInstanceFinder>();
+        return await workflowInstanceFinder.FindAsync(filter, cancellationToken);
     }
-    
+
     private async Task GenerateJobsAsync(ActivityExecutionContext context, AlterationPlan plan, IEnumerable<string> workflowInstanceIds)
     {
         var cancellationToken = context.CancellationToken;

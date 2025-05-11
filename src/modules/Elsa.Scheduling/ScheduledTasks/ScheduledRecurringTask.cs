@@ -1,7 +1,6 @@
-using Elsa.Common.Contracts;
+using Elsa.Common;
 using Elsa.Mediator.Contracts;
 using Elsa.Scheduling.Commands;
-using Elsa.Scheduling.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Timer = System.Timers.Timer;
 
@@ -10,7 +9,7 @@ namespace Elsa.Scheduling.ScheduledTasks;
 /// <summary>
 /// A scheduled recurring task.
 /// </summary>
-public class ScheduledRecurringTask : IScheduledTask
+public class ScheduledRecurringTask : IScheduledTask, IDisposable
 {
     private readonly ITask _task;
     private readonly ISystemClock _systemClock;
@@ -35,7 +34,7 @@ public class ScheduledRecurringTask : IScheduledTask
         _scopeFactory = scopeFactory;
         _startAt = startAt;
         _interval = interval;
-        _cancellationTokenSource = new CancellationTokenSource();
+        _cancellationTokenSource = new();
 
         Schedule();
     }
@@ -72,11 +71,11 @@ public class ScheduledRecurringTask : IScheduledTask
     {
         if (delay < TimeSpan.Zero) delay = TimeSpan.FromSeconds(1);
 
-        _timer = new Timer(delay.TotalMilliseconds) { Enabled = true };
+        _timer = new(delay.TotalMilliseconds) { Enabled = true };
 
         _timer.Elapsed += async (_, _) =>
         {
-            _timer.Dispose();
+            _timer?.Dispose();
             _timer = null;
             _startAt = _systemClock.UtcNow + _interval;
 
@@ -87,5 +86,11 @@ public class ScheduledRecurringTask : IScheduledTask
             if (!cancellationToken.IsCancellationRequested) await commandSender.SendAsync(new RunScheduledTask(_task), cancellationToken);
             if (!cancellationToken.IsCancellationRequested) Schedule();
         };
+    }
+
+    void IDisposable.Dispose()
+    {
+        _cancellationTokenSource.Dispose();
+        _timer?.Dispose();
     }
 }

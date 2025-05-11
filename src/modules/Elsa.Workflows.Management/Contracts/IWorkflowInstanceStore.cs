@@ -4,7 +4,7 @@ using Elsa.Workflows.Management.Filters;
 using Elsa.Workflows.Management.Models;
 using JetBrains.Annotations;
 
-namespace Elsa.Workflows.Management.Contracts;
+namespace Elsa.Workflows.Management;
 
 /// <summary>
 /// Represents a store of workflow instances.
@@ -90,7 +90,7 @@ public interface IWorkflowInstanceStore
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A list of workflow instance IDs.</returns>
     ValueTask<IEnumerable<string>> FindManyIdsAsync(WorkflowInstanceFilter filter, CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Returns a paginated list of workflow instance IDs matching the specified filter.
     /// </summary>
@@ -119,7 +119,6 @@ public interface IWorkflowInstanceStore
     /// <returns>A list of workflow instance summaries.</returns>
     ValueTask<IEnumerable<WorkflowInstanceSummary>> SummarizeManyAsync(WorkflowInstanceFilter filter, CancellationToken cancellationToken = default);
     
-
     /// <summary>
     /// Returns a list of workflow instance summaries matching the specified filter and order.
     /// </summary>
@@ -131,17 +130,37 @@ public interface IWorkflowInstanceStore
     ValueTask<IEnumerable<WorkflowInstanceSummary>> SummarizeManyAsync<TOrder>(WorkflowInstanceFilter filter, WorkflowInstanceOrder<TOrder> order, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Saves the specified workflow instance.
+    /// Adds or updates the specified <see cref="WorkflowInstance"/> in the persistence store.
     /// </summary>
+    /// <remarks>
+    /// If the record does not already exist, it is added to the store; if it does exist, its existing entry is updated.
+    /// </remarks>
     /// <param name="instance">The workflow instance.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     ValueTask SaveAsync(WorkflowInstance instance, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Adds the specified <see cref="WorkflowInstance"/> in the persistence store.
+    /// </summary>
+    /// <param name="instance">The workflow instance.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    ValueTask AddAsync(WorkflowInstance instance, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Updates the specified <see cref="WorkflowInstance"/> in the persistence store.
+    /// </summary>
+    /// <param name="instance">The workflow instance.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    ValueTask UpdateAsync(WorkflowInstance instance, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Saves the specified workflow instances.
+    /// Adds or updates the specified set of <see cref="WorkflowInstance"/> objects in the persistence store.
     /// </summary>
     /// <param name="instances">The workflow instances.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <remarks>
+    /// If the record does not already exist, it is added to the store; if it does exist, its existing entry is updated.
+    /// </remarks>
     ValueTask SaveManyAsync(IEnumerable<WorkflowInstance> instances, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -151,4 +170,12 @@ public interface IWorkflowInstanceStore
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The number of deleted workflow instances.</returns>
     ValueTask<long> DeleteAsync(WorkflowInstanceFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates the "LastUpdated" timestamp of a workflow instance.
+    /// </summary>
+    /// <param name="workflowInstanceId">The unique identifier of the workflow instance.</param>
+    /// <param name="value">The new timestamp value to set.</param>
+    /// <param name="cancellationToken">The cancellation token to observe during the operation.</param>
+    Task UpdateUpdatedTimestampAsync(string workflowInstanceId, DateTimeOffset value, CancellationToken cancellationToken = default);
 }

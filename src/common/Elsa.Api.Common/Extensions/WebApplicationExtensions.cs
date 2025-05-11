@@ -1,6 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Elsa.Workflows.Contracts;
+using Elsa.Workflows;
 using FastEndpoints;
 using JetBrains.Annotations;
 using Microsoft.AspNetCore.Builder;
@@ -23,20 +24,25 @@ public static class WebApplicationExtensions
     /// <param name="app"></param>
     /// <param name="routePrefix">The route prefix to apply to Elsa API endpoints.</param>
     /// <example>E.g. "elsa/api" will expose endpoints like this: "/elsa/api/workflow-definitions"</example>
-    public static IApplicationBuilder UseWorkflowsApi(this IApplicationBuilder app, string routePrefix = "elsa/api") =>
-        app.UseFastEndpoints(config =>
+    public static IApplicationBuilder UseWorkflowsApi(this IApplicationBuilder app, string routePrefix = "elsa/api")
+    {
+        return app.UseFastEndpoints(config =>
         {
             config.Endpoints.RoutePrefix = routePrefix;
             config.Serializer.RequestDeserializer = DeserializeRequestAsync;
             config.Serializer.ResponseSerializer = SerializeRequestAsync;
+
+            config.Binding.ValueParserFor<DateTimeOffset>(s =>
+                new(DateTimeOffset.TryParse(s.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var result), result));
         });
-    
+    }
+
     /// <summary>
     /// Register the FastEndpoints middleware configured for use with with Elsa API endpoints.
     /// </summary>
     /// <param name="routes">The <see cref="IEndpointRouteBuilder"/> to register the endpoints with.</param>
     /// <param name="routePrefix">The route prefix to apply to Elsa API endpoints.</param>
-    /// /// <example>E.g. "elsa/api" will expose endpoints like this: "/elsa/api/workflow-definitions"</example>
+    /// <example>E.g. "elsa/api" will expose endpoints like this: "/elsa/api/workflow-definitions"</example>
     public static IEndpointRouteBuilder MapWorkflowsApi(this IEndpointRouteBuilder routes, string routePrefix = "elsa/api") =>
         routes.MapFastEndpoints(config =>
         {
@@ -48,7 +54,7 @@ public static class WebApplicationExtensions
     private static ValueTask<object?> DeserializeRequestAsync(HttpRequest httpRequest, Type modelType, JsonSerializerContext? serializerContext, CancellationToken cancellationToken)
     {
         var serializer = httpRequest.HttpContext.RequestServices.GetRequiredService<IApiSerializer>();
-        var options = serializer.CreateOptions();
+        var options = serializer.GetOptions();
 
         return serializerContext == null
             ? JsonSerializer.DeserializeAsync(httpRequest.Body, modelType, options, cancellationToken)
@@ -58,7 +64,7 @@ public static class WebApplicationExtensions
     private static Task SerializeRequestAsync(HttpResponse httpResponse, object? dto, string contentType, JsonSerializerContext? serializerContext, CancellationToken cancellationToken)
     {
         var serializer = httpResponse.HttpContext.RequestServices.GetRequiredService<IApiSerializer>();
-        var options = serializer.CreateOptions();
+        var options = serializer.GetOptions();
 
         httpResponse.ContentType = contentType;
         return serializerContext == null

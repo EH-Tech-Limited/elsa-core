@@ -1,6 +1,4 @@
-using Elsa.Workflows.Contracts;
-
-namespace Elsa.Workflows.Management.Contracts;
+namespace Elsa.Workflows.Management;
 
 /// <summary>
 /// Populates the <see cref="IActivityRegistry"/> with activities.
@@ -12,11 +10,4 @@ public interface IActivityRegistryPopulator
     /// </summary>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task PopulateRegistryAsync(CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Populates the <see cref="IActivityRegistry"/> with activities for the specified provider.
-    /// </summary>
-    /// <param name="providerType">The type of the provider.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    Task PopulateRegistryAsync(Type providerType, CancellationToken cancellationToken = default);
 }

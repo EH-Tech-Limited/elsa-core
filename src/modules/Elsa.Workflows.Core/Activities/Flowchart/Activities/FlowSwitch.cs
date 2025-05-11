@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using Elsa.Expressions.Contracts;
 using Elsa.Expressions.Models;
-using Elsa.Extensions;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Activities.Flowchart.Models;
 using Elsa.Workflows.Attributes;
@@ -20,7 +19,7 @@ namespace Elsa.Workflows.Activities.Flowchart.Activities;
 public class FlowSwitch : Activity
 {
     /// <inheritdoc />
-    public FlowSwitch([CallerFilePath] string? source = default, [CallerLineNumber] int? line = default) : base(source, line)
+    public FlowSwitch([CallerFilePath] string? source = null, [CallerLineNumber] int? line = null) : base(source, line)
     {
     }
 

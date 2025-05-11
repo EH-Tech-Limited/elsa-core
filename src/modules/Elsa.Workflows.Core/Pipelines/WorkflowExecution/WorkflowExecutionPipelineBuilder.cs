@@ -1,5 +1,3 @@
-using Elsa.Workflows.Contracts;
-
 namespace Elsa.Workflows.Pipelines.WorkflowExecution;
 
 /// <inheritdoc />
@@ -18,6 +16,9 @@ public class WorkflowExecutionPipelineBuilder : IWorkflowExecutionPipelineBuilde
 
     /// <inheritdoc />
     public IDictionary<object, object?> Properties { get; } = new Dictionary<object, object?>();
+
+    /// <inheritdoc />
+    public IEnumerable<Func<WorkflowMiddlewareDelegate, WorkflowMiddlewareDelegate>> Components => _components.ToList();
 
     /// <inheritdoc />
     public IServiceProvider ServiceProvider
@@ -48,6 +49,20 @@ public class WorkflowExecutionPipelineBuilder : IWorkflowExecutionPipelineBuilde
     public IWorkflowExecutionPipelineBuilder Reset()
     {
         _components.Clear();
+        return this;
+    }
+
+    /// <inheritdoc />
+    public IWorkflowExecutionPipelineBuilder Insert(int index, Func<WorkflowMiddlewareDelegate, WorkflowMiddlewareDelegate> middleware)
+    {
+        _components.Insert(index, middleware);
+        return this;
+    }
+
+    /// <inheritdoc />
+    public IWorkflowExecutionPipelineBuilder Replace(int index, Func<WorkflowMiddlewareDelegate, WorkflowMiddlewareDelegate> middleware)
+    {
+        _components[index] = middleware;
         return this;
     }
 

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Elsa.Expressions.Helpers;
 using Elsa.Expressions.Models;
 using Elsa.Workflows;
 using Elsa.Workflows.Memory;
@@ -20,7 +21,7 @@ public static class OutputExtensions
     /// <summary>
     /// Sets the output to the specified value.
     /// </summary>
-    public static void Set<T>(this Output<T>? output, ActivityExecutionContext context, T? value, [CallerArgumentExpression("output")] string? outputName = default) => context.Set(output, value, outputName);
+    public static void Set<T>(this Output<T>? output, ActivityExecutionContext context, T? value, [CallerArgumentExpression("output")] string? outputName = null) => context.Set(output, value, outputName);
     
     /// <summary>
     /// Sets the output to the specified value.
@@ -36,4 +37,36 @@ public static class OutputExtensions
     /// Sets the output to the specified value.
     /// </summary>
     public static void Set<T>(this Output<T>? output, ExpressionExecutionContext context, Variable<T> value) => context.Set(output, value.Get(context));
+    
+    /// <summary>
+    /// Gets the target type of the specified variable type, if any, linked to the output.
+    /// </summary>
+    public static Type? GetTargetType(this Output? output, ActivityExecutionContext context)
+    {
+        var memoryBlockReference = output?.MemoryBlockReference();
+        
+        if (memoryBlockReference is null)
+            return null;
+
+        if(!context.ExpressionExecutionContext.TryGetBlock(memoryBlockReference, out var memoryBlock))
+            return null;
+        
+        var parsedContentVariableType = (memoryBlock.Metadata as VariableBlockMetadata)?.Variable.GetType();
+        return parsedContentVariableType?.GenericTypeArguments.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Returns a value indicating whether the output has a target.
+    /// </summary>
+    public static bool HasTarget(this Output? output, ActivityExecutionContext context)
+    {
+        var memoryBlockReference = output?.MemoryBlockReference();
+        return memoryBlockReference is not null && context.ExpressionExecutionContext.TryGetBlock(memoryBlockReference, out _);
+    }
+    
+    public static object? ParseValue(this Output output, object? value)
+    {
+        var genericType = output.GetType();
+        return VariableExtensions.ParseValue(genericType, value);
+    }
 }

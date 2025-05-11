@@ -1,18 +1,16 @@
 # ELSA 3.0
 
-![Elsa Workflows](./design/artwork/elsa-logo-art.png)
+![Elsa Workflows](./design/artwork/elsa-v3-avatar.png)
 
 [![Elsa 3 Prerelease](https://github.com/elsa-workflows/elsa-core/actions/workflows/packages.yml/badge.svg)](https://github.com/elsa-workflows/elsa-core/actions/workflows/packages.yml)
 [![Nuget (with prereleases)](https://img.shields.io/nuget/vpre/Elsa)](https://www.nuget.org/packages/Elsa/)
 [![feedz.io](https://img.shields.io/badge/endpoint.svg?url=https%3A%2F%2Ff.feedz.io%2Felsa-workflows%2Felsa-3%2Fshield%2FElsa%2Flatest)](https://f.feedz.io/elsa-workflows/elsa-3/nuget/index.json)
-[![npm](https://img.shields.io/npm/v/@elsa-workflows/elsa-workflows-studio)](https://www.npmjs.com/package/@elsa-workflows/elsa-workflows-studio)
-[![feedz.io](https://img.shields.io/badge/endpoint.svg?url=https%3A%2F%2Ff.feedz.io%2Felsa-workflows%2Felsa-3%2Fshield%2F%2540elsa-workflows%252Felsa-studio-wasm%2Flatest&label=npm%20preview)](https://f.feedz.io/elsa-workflows/elsa-3/packages/%40elsa-workflows%2Felsa-studio-wasm/latest/download)
 [![Docker Image Version (latest semver)](https://img.shields.io/docker/v/elsaworkflows/elsa-v3?label=docker&logo=docker)](https://hub.docker.com/repository/docker/elsaworkflows/elsa-v3)
 [![Discord](https://img.shields.io/discord/814605913783795763?label=discord&logo=discord)](https://discord.gg/hhChk5H472)
 [![Stack Overflow questions](https://img.shields.io/badge/stackoverflow-elsa_workflows-orange.svg)]( http://stackoverflow.com/questions/tagged/elsa-workflows )
-[![Subreddit subscribers](https://img.shields.io/reddit/subreddit-subscribers/elsaworkflows?style=social)](https://www.reddit.com/r/elsaworkflows/)
+[![Gurubase](https://img.shields.io/badge/Gurubase-Ask%20Elsa%20Guru-006BFF)](https://gurubase.io/g/elsa)
 
-### [For Elsa 2 Click Here](https://github.com/elsa-workflows/elsa-core/tree/2.x)
+### [For Elsa 2, Click Here](https://github.com/elsa-workflows/elsa-core/tree/2.x)
 
 ## Introduction
 Elsa is a powerful workflow library that enables workflow execution within any .NET application. Elsa allows you to define workflows in various ways, including:
@@ -48,19 +46,22 @@ By default, you can access http://localhost:13000 and log in with:
 - [Features](#features)
 - [Roadmap](#roadmap)
 - [Use Cases](#use-cases)
+- [Coding Workflows](#coding-workflows)
+- [Designed Workflows](#designed-workflows)
+- [Contributing](#contributing)
+- [Support](#support)
+  - [Community Support](#community-support)
+  - [Enterprise Support](#enterprise-support)
 
 ## Documentation
 
-For comprehensive documentation and to get started with Elsa, please visit the [Elsa Documentation Website](https://v3.elsaworkflows.io/).
+[Elsa Documentation Website](https://docs.elsaworkflows.io/).
 
 ## Known Issues and Limitations
 
 Elsa is continually evolving, and while it offers powerful capabilities, there are some known limitations and ongoing work:
 
 - Documentation is still a work in progress.
-- The designer is not yet fully embeddable in other applications; this feature is planned for a future release.
-- C# and Python expressions are not yet fully tested.
-- Bulk Dispatch Workflows is a new activity and not yet fully tested.
 - Input/Output is not yet implemented in the Workflow Instance Viewer.
 - Starting workflows from the designer is currently supported only for workflows that do not require input and do not start with a trigger; this is planned for a future release.
 - The designer currently only supports Flowchart activities. Support for Sequence and StateMachine activities is planned for a future release.
@@ -86,15 +87,7 @@ Elsa offers a wide range of features for building and executing workflows, inclu
 
 ## Roadmap
 
-The following features are planned for future releases of Elsa:
-
-- [ ] Multi-tenancy
-- [ ] State Machine activity
-- [ ] Designer support for Sequence activity & StateMachine activity
-- [ ] BPMN 2.0 support
-- [ ] DMN support
-- [ ] Workflow migration to new versions via UI
-- [ ] Capsules ("hot" deployable workflow packages containing activities and configuration)
+See #3232
 
 ## Use Cases
 
@@ -105,7 +98,7 @@ Elsa can be used in a variety of scenarios, including:
 - Scheduled workflows such as sending daily reports.
 - Event-driven workflows such as sending welcome emails when a user signs up.
 
-## Programmatic Workflows
+## Coding Workflows
 
 Elsa allows you to define workflows in code using C#. The following example shows how to receive HTTP requests and send an email in response:
 
@@ -137,12 +130,11 @@ public class SendEmailWorkflow : WorkflowBase
 }
 ```
 
-## Designed Workflows
+## Designing Workflows
 
 Elsa allows you to define workflows using a visual designer. The following example shows how to receive HTTP requests and send an email in response:
 
 ![Elsa ships with a powerful visual designer](./design/screenshots/http-send-email-workflow-designer.png)
-
 
 ## Contributing
 
@@ -156,12 +148,12 @@ git clone https://github.com/YOUR_USERNAME/elsa-core.git
 ```
 Replace `YOUR_USERNAME` with your GitHub username. For more information on forking a repo, check out the GitHub documentation [here](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo).
 
-Incorporating the details about the "bundles" folder and its projects into the second point about opening the `Elsa.sln` using your favorite IDE, we can expand the instructions to guide developers on where to start and what projects they might want to explore first. Here's an updated version of that section with the additional information:
+Incorporating the details about the "apps" folder and its projects into the second point about opening the `Elsa.sln` using your favorite IDE, we can expand the instructions to guide developers on where to start and what projects they might want to explore first. Here's an updated version of that section with the additional information:
 
 ### 2. Open `Elsa.sln` Using Your Favorite IDE
 After cloning the repository, navigate to the cloned directory and open the `Elsa.sln` solution file with your preferred IDE that supports .NET development, such as Visual Studio, JetBrains Rider, or Visual Studio Code with the appropriate extensions.
 
-Within the solution, you will find a "bundles" folder containing three projects designed to help you get started and explore the capabilities of Elsa Workflow:
+Within the solution, you will find an "apps" folder containing three projects designed to help you get started and explore the capabilities of Elsa Workflow:
 
 - **Elsa.Server.Web**: This project is a reference ASP.NET Core application that acts as a workflow server. It's a great starting point if you want to understand how Elsa functions as a server-side workflow engine.
 
@@ -177,6 +169,17 @@ Before you start working on your changes or submit a pull request, please open a
 
 This approach helps us streamline contributions and ensures that your efforts are aligned with the project's needs and priorities. We look forward to your contributions and are here to support you throughout the process. Thank you for contributing to the Elsa Workflow project!
 
----
+## Support
 
-Remember to replace any placeholder URLs or instructions with the specific details relevant to the Elsa Workflow project as necessary.
+There are various ways to get support for Elsa Workflows, ranging from community-driven channels to enterprise-level services.
+
+### Community Support
+
+Elsa has an active and helpful community where you can find support through multiple channels:
+- [GitHub Issues](https://github.com/elsa-workflows/elsa-core/issues) for bug reports and feature requests.
+- [GitHub Discussions](https://github.com/elsa-workflows/elsa-core/discussions) for open-ended conversations, questions, and community-driven support.
+- [Discord](https://discord.gg/hhChk5H472) for real-time support and interaction with the Elsa community.
+- [StackOverflow](https://stackoverflow.com/questions/tagged/elsa-workflows) for searching or asking technical questions.
+
+### Enterprise Support
+For organizations requiring professional support and long-term commitment, [ELSA-X](https://elsa-x.io) offers enterprise-level services and ensures continuity and future development of the Elsa framework, provides custom solutions, and develops commercial extensions tailored to enterprise needs.

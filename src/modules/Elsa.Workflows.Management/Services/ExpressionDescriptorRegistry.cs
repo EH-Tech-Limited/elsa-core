@@ -8,7 +8,9 @@ public class ExpressionDescriptorRegistry : IExpressionDescriptorRegistry
 {
     private readonly IDictionary<string, ExpressionDescriptor> _expressionSyntaxDescriptors = new Dictionary<string, ExpressionDescriptor>();
     
+    /// <summary>
     /// Represents a registry of expression descriptors.
+    /// </summary>
     public ExpressionDescriptorRegistry(IEnumerable<IExpressionDescriptorProvider> providers)
     {
         foreach (var provider in providers)
@@ -19,7 +21,10 @@ public class ExpressionDescriptorRegistry : IExpressionDescriptorRegistry
     }
 
     /// <inheritdoc />
-    public void Add(ExpressionDescriptor descriptor) => _expressionSyntaxDescriptors[descriptor.Type] = descriptor;
+    public void Add(ExpressionDescriptor descriptor)
+    {
+        _expressionSyntaxDescriptors[descriptor.Type] = descriptor;
+    }
 
     /// <inheritdoc />
     public void AddRange(IEnumerable<ExpressionDescriptor> descriptors)
@@ -35,5 +40,5 @@ public class ExpressionDescriptorRegistry : IExpressionDescriptorRegistry
     public ExpressionDescriptor? Find(Func<ExpressionDescriptor, bool> predicate) => _expressionSyntaxDescriptors.Values.FirstOrDefault(predicate);
 
     /// <inheritdoc />
-    public ExpressionDescriptor? Find(string type) => _expressionSyntaxDescriptors.TryGetValue(type, out var descriptor) ? descriptor : default!;
+    public ExpressionDescriptor? Find(string type) => _expressionSyntaxDescriptors.TryGetValue(type, out var descriptor) ? descriptor : default;
 }

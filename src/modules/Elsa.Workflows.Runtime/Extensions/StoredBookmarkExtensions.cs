@@ -1,4 +1,4 @@
-using Elsa.Workflows.Contracts;
+using Elsa.Workflows;
 using Elsa.Workflows.Helpers;
 using Elsa.Workflows.Runtime.Entities;
 
@@ -17,8 +17,7 @@ public static class StoredBookmarkExtensions
     /// <typeparam name="T">The type of the Data property.</typeparam>
     /// <returns>The Data property of the stored bookmark as a strongly-typed object.</returns>
     public static T GetPayload<T>(this StoredBookmark storedBookmark) => (T)storedBookmark.Payload!;
-    
-    
+
     /// <summary>
     /// Filters the specified set of stored bookmarks by the specified activity type.
     /// </summary>
@@ -28,6 +27,11 @@ public static class StoredBookmarkExtensions
     public static IEnumerable<StoredBookmark> Filter<T>(this IEnumerable<StoredBookmark> bookmarks) where T : IActivity
     {
         var bookmarkName = ActivityTypeNameHelper.GenerateTypeName<T>();
-        return bookmarks.Where(x => x.ActivityTypeName == bookmarkName);
+        return bookmarks.Filter(bookmarkName);
+    }
+    
+    public static IEnumerable<StoredBookmark> Filter(this IEnumerable<StoredBookmark> bookmarks, string name)
+    {
+        return bookmarks.Where(x => x.Name == name);
     }
 }

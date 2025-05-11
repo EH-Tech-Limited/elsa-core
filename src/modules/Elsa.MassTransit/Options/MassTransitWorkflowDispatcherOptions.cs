@@ -2,11 +2,13 @@ using Elsa.MassTransit.ConsumerDefinitions;
 
 namespace Elsa.MassTransit.Options;
 
+/// <summary>
 /// Provides options to the <see cref="DispatchWorkflowRequestConsumerDefinition"/>
+/// </summary>
 public class MassTransitWorkflowDispatcherOptions
 {
-    /// The TTL of queues that are seen as temporary (typically queues that are created per running instance).
-    public TimeSpan? TemporaryQueueTtl { get; set; }
+    /// <summary>
     /// The number of concurrent messages to process.
+    /// </summary>
     public int? ConcurrentMessageLimit { get; set; }
 }

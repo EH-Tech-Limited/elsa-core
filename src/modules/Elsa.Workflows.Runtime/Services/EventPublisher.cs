@@ -1,73 +1,44 @@
-using Elsa.Mediator;
-using Elsa.Mediator.Contracts;
+using Elsa.Workflows.Helpers;
 using Elsa.Workflows.Runtime.Activities;
-using Elsa.Workflows.Runtime.Bookmarks;
-using Elsa.Workflows.Runtime.Contracts;
-using Elsa.Workflows.Runtime.Models;
-using Elsa.Workflows.Runtime.Options;
-using Elsa.Workflows.Runtime.Parameters;
-using Elsa.Workflows.Runtime.Results;
+using Elsa.Workflows.Runtime.Stimuli;
 
-namespace Elsa.Workflows.Runtime.Services;
+namespace Elsa.Workflows.Runtime;
 
 /// <inheritdoc />
-public class EventPublisher : IEventPublisher
+public class EventPublisher(IStimulusSender stimulusSender, IStimulusDispatcher stimulusDispatcher) : IEventPublisher
 {
-    private readonly IWorkflowInbox _workflowInbox;
-
-    /// <summary>
-    /// Constructor.
-    /// </summary>
-    public EventPublisher(IWorkflowInbox workflowInbox)
-    {
-        _workflowInbox = workflowInbox;
-    }
-
     /// <inheritdoc />
-    public async Task<ICollection<WorkflowExecutionResult>> PublishAsync(
+    public async Task PublishAsync(
         string eventName,
-        string? correlationId = default,
-        string? workflowInstanceId = default,
-        string? activityInstanceId = default,
-        object? payload = default,
+        string? correlationId = null,
+        string? workflowInstanceId = null,
+        string? activityInstanceId = null,
+        object? payload = null,
+        bool asynchronous = false,
         CancellationToken cancellationToken = default)
     {
-        return await PublishInternalAsync(eventName, false, correlationId, workflowInstanceId, activityInstanceId, payload, cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public async Task DispatchAsync(
-        string eventName,
-        string? correlationId = default,
-        string? workflowInstanceId = default,
-        string? activityInstanceId = default,
-        object? payload = default,
-        CancellationToken cancellationToken = default)
-    {
-        await PublishInternalAsync(eventName, true, correlationId, workflowInstanceId, activityInstanceId, payload, cancellationToken);
-    }
-
-    private async Task<ICollection<WorkflowExecutionResult>> PublishInternalAsync(
-        string eventName,
-        bool dispatchAsynchronously,
-        string? correlationId = default,
-        string? workflowInstanceId = default,
-        string? activityInstanceId = default,
-        object? payload = default,
-        CancellationToken cancellationToken = default)
-    {
-        var eventBookmark = new EventBookmarkPayload(eventName);
+        var stimulus = new EventStimulus(eventName);
         var workflowInput = new Dictionary<string, object>
         {
-            [Event.EventPayloadWorkflowInputKey] = payload ?? new Dictionary<string, object>()
+            [Event.EventInputWorkflowInputKey] = payload ?? new Dictionary<string, object>()
         };
-        var message = NewWorkflowInboxMessage.For<Event>(eventBookmark, workflowInstanceId, correlationId, activityInstanceId, workflowInput);
-        var options = new WorkflowInboxMessageDeliveryParams
+        var metadata = new StimulusMetadata
         {
-            DispatchAsynchronously = dispatchAsynchronously
+            CorrelationId = correlationId,
+            ActivityInstanceId = activityInstanceId,
+            WorkflowInstanceId = workflowInstanceId,
+            Input = workflowInput
         };
-
-        var result = await _workflowInbox.SubmitAsync(message, options, cancellationToken);
-        return result.WorkflowExecutionResults;
+        if (asynchronous)
+        {
+            await stimulusDispatcher.SendAsync(new()
+            {
+                ActivityTypeName = ActivityTypeNameHelper.GenerateTypeName<Event>(),
+                Stimulus = stimulus,
+                Metadata = metadata
+            }, cancellationToken);
+        }
+        else
+            await stimulusSender.SendAsync<Event>(stimulus, metadata, cancellationToken);
     }
 }

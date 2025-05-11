@@ -2,7 +2,7 @@ using Elsa.Alterations.AlterationTypes;
 using Elsa.Alterations.Core.Abstractions;
 using Elsa.Alterations.Core.Contexts;
 using Elsa.Common.Models;
-using Elsa.Workflows.Management.Contracts;
+using Elsa.Workflows.Management;
 using JetBrains.Annotations;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,7 +21,7 @@ public class MigrateHandler : AlterationHandlerBase<Migrate>
         var definitionId = context.Workflow.Identity.DefinitionId;
         var targetVersion = alteration.TargetVersion;
         var cancellationToken = context.CancellationToken;
-        var targetWorkflowDefinition = await workflowDefinitionService.FindAsync(definitionId, VersionOptions.SpecificVersion(targetVersion), cancellationToken);
+        var targetWorkflowDefinition = await workflowDefinitionService.FindWorkflowDefinitionAsync(definitionId, VersionOptions.SpecificVersion(targetVersion), cancellationToken);
         
         if (targetWorkflowDefinition == null)
         {
@@ -30,7 +30,7 @@ public class MigrateHandler : AlterationHandlerBase<Migrate>
         }
         
         var targetWorkflow = await workflowDefinitionService.MaterializeWorkflowAsync(targetWorkflowDefinition, cancellationToken);
-        await context.WorkflowExecutionContext.SetWorkflowAsync(targetWorkflow);
+        await context.WorkflowExecutionContext.SetWorkflowGraphAsync(targetWorkflow);
         
         context.Succeed();
     }

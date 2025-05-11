@@ -1,47 +1,23 @@
-using Elsa.Extensions;
-using Elsa.Workflows.Models;
-using Elsa.Workflows.Runtime.Contracts;
+using Elsa.Workflows.LogPersistence;
 using Elsa.Workflows.Runtime.Entities;
 using Elsa.Workflows.State;
 
-namespace Elsa.Workflows.Runtime.Services;
+namespace Elsa.Workflows.Runtime;
 
 /// <inheritdoc />
 public class DefaultActivityExecutionMapper : IActivityExecutionMapper
 {
-    /// <inheritdoc />
     public ActivityExecutionRecord Map(ActivityExecutionContext source)
     {
-        // Get any outcomes that were added to the activity execution context.
-        var outcomes = source.JournalData.TryGetValue("Outcomes", out var resultValue) ? resultValue as string[] : default;
-        var payload = new Dictionary<string, object>();
+        var outputs = source.GetOutputs();
+        var inputs = source.GetInputs();
+        var persistenceMap = source.GetLogPersistenceModeMap();
+        var persistableInputs = GetPersistableInputOutput(inputs, persistenceMap.Inputs);
+        var persistableOutputs = GetPersistableInputOutput(outputs, persistenceMap.Outputs);
+        var persistableProperties = GetPersistableDictionary(source.Properties!, persistenceMap.InternalState);
+        var persistableJournalData = GetPersistableDictionary(source.JournalData!, persistenceMap.InternalState);
 
-        if (outcomes != null)
-            payload.Add("Outcomes", outcomes);
-
-        // Get any outputs that were added to the activity execution context.
-        var activity = source.Activity;
-        var expressionExecutionContext = source.ExpressionExecutionContext;
-        var activityDescriptor = source.ActivityDescriptor;
-        var outputDescriptors = activityDescriptor.Outputs;
-
-        var outputs = outputDescriptors.ToDictionary(x => x.Name, x =>
-        {
-            if (x.IsSerializable == false)
-                return "(not serializable)";
-
-            var cachedValue = activity.GetOutput(expressionExecutionContext, x.Name);
-
-            if (cachedValue != default)
-                return cachedValue;
-
-            if (x.ValueGetter(activity) is Output output && source.TryGet(output.MemoryBlockReference(), out var outputValue))
-                return outputValue;
-
-            return default;
-        });
-
-        return new ActivityExecutionRecord
+        return new()
         {
             Id = source.Id,
             ActivityId = source.Activity.Id,
@@ -49,27 +25,41 @@ public class DefaultActivityExecutionMapper : IActivityExecutionMapper
             WorkflowInstanceId = source.WorkflowExecutionContext.Id,
             ActivityType = source.Activity.Type,
             ActivityName = source.Activity.Name,
-            ActivityState = source.ActivityState,
-            Outputs = outputs,
-            Properties = source.Properties,
-            Payload = payload,
+            ActivityState = persistableInputs,
+            Outputs = persistableOutputs,
+            Properties = persistableProperties,
+            Payload = persistableJournalData!,
             Exception = ExceptionState.FromException(source.Exception),
             ActivityTypeVersion = source.Activity.Version,
             StartedAt = source.StartedAt,
             HasBookmarks = source.Bookmarks.Any(),
-            Status = GetAggregateStatus(source),
+            Status = source.Status,
+            AggregateFaultCount = source.AggregateFaultCount,
             CompletedAt = source.CompletedAt
         };
     }
 
-    private ActivityStatus GetAggregateStatus(ActivityExecutionContext context)
+    /// <inheritdoc />
+    public Task<ActivityExecutionRecord> MapAsync(ActivityExecutionContext source)
     {
-        // If any child activity is faulted, the aggregate status is faulted.
-        var descendantContexts = context.GetDescendants().ToList();
+        return Task.FromResult(Map(source));
+    }
 
-        if (descendantContexts.Any(x => x.Status == ActivityStatus.Faulted))
-            return ActivityStatus.Faulted;
+    private IDictionary<string, object?> GetPersistableInputOutput(IDictionary<string, object> state, IDictionary<string, LogPersistenceMode> map)
+    {
+        var result = new Dictionary<string, object?>();
+        foreach (var stateEntry in state)
+        {
+            var mode = map.TryGetValue(stateEntry.Key, out var value) ? value : LogPersistenceMode.Include;
+            if (mode == LogPersistenceMode.Include)
+                result.Add(stateEntry.Key, stateEntry.Value);
+        }
 
-        return context.Status;
+        return result;
+    }
+
+    private IDictionary<string, object?>? GetPersistableDictionary(IDictionary<string, object?> dictionary, LogPersistenceMode mode)
+    {
+        return mode == LogPersistenceMode.Include ? dictionary : null;
     }
 }
